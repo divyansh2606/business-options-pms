@@ -1,7 +1,7 @@
 // src/api/stockAPI.js
 // Stock API - IMS-O2D Google Sheet integration (hardened/timeout/retries)
 const STOCK_APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbzY3uLGK4pY4ci1R_rdla-tE9cADkbsQkrYKb82_Uof9rU5ym59k4qc09Orv6kw4i5s/exec";
+  "https://script.google.com/macros/s/AKfycbyaqaZsGWglJ2mtjH-L_ApEb1VjfqYNokv_f2Wg_AntYqG28okVFP3HQ276Fe6ygC8E/exec";
 /**
  * Fetch wrapper with timeout + simple retry on network errors.
  * @param {string} url
