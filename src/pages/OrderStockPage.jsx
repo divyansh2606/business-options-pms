@@ -329,10 +329,10 @@ export default function OrderStockPage() {
       {notification.show && (
         <div
           className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg ${notification.type === 'success'
-              ? 'bg-green-500 text-white'
-              : notification.type === 'info'
-                ? 'bg-blue-500 text-white'
-                : 'bg-red-500 text-white'
+            ? 'bg-green-500 text-white'
+            : notification.type === 'info'
+              ? 'bg-blue-500 text-white'
+              : 'bg-red-500 text-white'
             }`}
         >
           {notification.message}
@@ -341,11 +341,11 @@ export default function OrderStockPage() {
 
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Top bar */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-0">
           <h1 className="text-2xl font-bold text-gray-800">Order Stock</h1>
           <button
             onClick={() => navigate('/dashboard')}
-            className="px-4 py-2 text-sm rounded-lg bg-white shadow hover:bg-gray-100"
+            className="w-full sm:w-auto px-4 py-2 text-sm rounded-lg bg-white shadow hover:bg-gray-100"
           >
             ← Back to Dashboard
           </button>
@@ -582,10 +582,10 @@ export default function OrderStockPage() {
                       <td className="border-r border-gray-200 px-4 py-3 text-sm">{order.unit}</td>
                       <td className="border-r border-gray-200 px-4 py-3 text-sm">
                         <span className={`px-2 py-1 rounded text-xs font-medium ${order.priority === 'High'
-                            ? 'bg-red-100 text-red-800'
-                            : order.priority === 'Medium'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-green-100 text-green-800'
+                          ? 'bg-red-100 text-red-800'
+                          : order.priority === 'Medium'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-green-100 text-green-800'
                           }`}>
                           {order.priority}
                         </span>

@@ -456,18 +456,18 @@ export default function DashboardSummary() {
     <div className="p-8 min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100">
 
       {/* Filters */}
-      <div className="bg-white rounded-3xl shadow-2xl p-10 mb-8 border-4 border-indigo-200">
-        <div className="flex flex-wrap items-end justify-center gap-10">
+      <div className="bg-white rounded-3xl shadow-2xl p-4 md:p-10 mb-8 border-4 border-indigo-200">
+        <div className="flex flex-wrap items-end justify-center gap-4 md:gap-10">
 
           {/* Date */}
-          <div className="text-center">
-            <label className="block text-2xl font-bold text-indigo-800 mb-3">
+          <div className="text-center w-full md:w-auto">
+            <label className="block text-base md:text-2xl font-bold text-indigo-800 mb-2 md:mb-3">
               Date
             </label>
             <select
               value={selectedDate}
               onChange={handleDateChange}
-              className="px-12 py-5 text-2xl border-4 border-indigo-600 rounded-2xl"
+              className="w-full md:w-auto px-4 py-3 md:px-12 md:py-5 text-base md:text-2xl border-2 md:border-4 border-indigo-600 rounded-xl md:rounded-2xl"
             >
               {dateOptions.map((d) => (
                 <option key={d}>{d}</option>
@@ -476,14 +476,14 @@ export default function DashboardSummary() {
           </div>
 
           {/* Client */}
-          <div className="text-center">
-            <label className="block text-2xl font-bold text-indigo-800 mb-3">
+          <div className="text-center w-full md:w-auto">
+            <label className="block text-base md:text-2xl font-bold text-indigo-800 mb-2 md:mb-3">
               Client
             </label>
             <select
               value={client}
               onChange={handleClientChange}
-              className="px-12 py-5 text-2xl border-4 border-indigo-600 rounded-2xl"
+              className="w-full md:w-auto px-4 py-3 md:px-12 md:py-5 text-base md:text-2xl border-2 md:border-4 border-indigo-600 rounded-xl md:rounded-2xl"
             >
               {clientOptions.map((c) => (
                 <option key={c}>{c}</option>
@@ -492,14 +492,14 @@ export default function DashboardSummary() {
           </div>
 
           {/* Meal Type */}
-          <div className="text-center">
-            <label className="block text-2xl font-bold text-indigo-800 mb-3">
+          <div className="text-center w-full md:w-auto">
+            <label className="block text-base md:text-2xl font-bold text-indigo-800 mb-2 md:mb-3">
               Meal Type
             </label>
             <select
               value={mealType}
               onChange={handleMealChange}
-              className="px-12 py-5 text-2xl border-4 border-orange-600 rounded-2xl"
+              className="w-full md:w-auto px-4 py-3 md:px-12 md:py-5 text-base md:text-2xl border-2 md:border-4 border-orange-600 rounded-xl md:rounded-2xl"
             >
               {mealOptions.map((m) => (
                 <option key={m}>{m}</option>
@@ -508,15 +508,15 @@ export default function DashboardSummary() {
           </div>
 
           {/* Reload / Status */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 w-full md:w-auto">
             <button
               onClick={() => loadData(false)}
-              className="px-16 py-5 bg-purple-800 text-white text-2xl font-extrabold rounded-3xl shadow-xl hover:bg-purple-900 transition-colors"
+              className="w-full md:w-auto px-6 py-3 md:px-16 md:py-5 bg-purple-800 text-white text-base md:text-2xl font-extrabold rounded-2xl md:rounded-3xl shadow-xl hover:bg-purple-900 transition-colors"
             >
               RELOAD DATA
             </button>
             {autoSaving && (
-              <p className="text-center text-green-600 font-bold animate-pulse">
+              <p className="text-center text-green-600 font-bold animate-pulse text-sm md:text-base">
                 💾 Saving...
               </p>
             )}

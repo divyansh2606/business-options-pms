@@ -2,20 +2,20 @@ import React, { useState } from 'react';
 
 export default function EmployeesManagement({ data }) {
   const [showAddModal, setShowAddModal] = useState(false);
-  
+
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-lg">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 md:gap-0">
           <h3 className="text-lg font-semibold">Employees Management</h3>
-          <button 
+          <button
             onClick={() => setShowAddModal(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            className="w-full md:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
             Add New Employee
           </button>
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Employee Cards */}
           <div className="bg-gray-50 p-4 rounded-lg">
@@ -42,7 +42,7 @@ export default function EmployeesManagement({ data }) {
               </button>
             </div>
           </div>
-          
+
           <div className="bg-gray-50 p-4 rounded-lg">
             <div className="flex items-center mb-3">
               <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center text-white font-bold mr-3">
@@ -69,7 +69,7 @@ export default function EmployeesManagement({ data }) {
           </div>
         </div>
       </div>
-      
+
       {/* Add Employee Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -103,14 +103,14 @@ export default function EmployeesManagement({ data }) {
                 <input type="password" className="w-full border rounded-lg px-3 py-2" />
               </div>
               <div className="flex space-x-3">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg"
                 >

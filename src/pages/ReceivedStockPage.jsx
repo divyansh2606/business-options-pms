@@ -114,10 +114,10 @@ export default function ReceivedStockPage() {
       {notification.show && (
         <div
           className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg ${notification.type === 'success'
-              ? 'bg-green-500 text-white'
-              : notification.type === 'info'
-                ? 'bg-blue-500 text-white'
-                : 'bg-red-500 text-white'
+            ? 'bg-green-500 text-white'
+            : notification.type === 'info'
+              ? 'bg-blue-500 text-white'
+              : 'bg-red-500 text-white'
             }`}
         >
           {notification.message}
@@ -126,21 +126,21 @@ export default function ReceivedStockPage() {
 
       <div className="max-w-full mx-auto">
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-0 text-center sm:text-left">
           <div>
             <button
               onClick={() => navigate(-1)}
-              className="flex items-center text-blue-600 hover:text-blue-800 mb-3 transition-colors"
+              className="flex items-center justify-center sm:justify-start text-blue-600 hover:text-blue-800 mb-3 transition-colors"
             >
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
               Back to Dashboard
             </button>
-            <h1 className="text-3xl font-bold text-gray-800">Received Stock Entry</h1>
-            <p className="text-gray-600">Click on any green column to enter received stock data</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Received Stock Entry</h1>
+            <p className="text-gray-600 text-sm sm:text-base">Click on any green column to enter received stock data</p>
           </div>
-          <div className="text-4xl">📦</div>
+          <div className="text-4xl mt-4 sm:mt-0">📦</div>
         </div>
 
         {/* Loading State */}
@@ -206,8 +206,8 @@ export default function ReceivedStockPage() {
                         <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-200">{order.unit}</td>
                         <td className="px-4 py-3 text-sm border-r border-gray-200">
                           <span className={`px-2 py-1 rounded-full text-xs font-semibold ${order.priority === 'High' ? 'bg-red-100 text-red-800' :
-                              order.priority === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-green-100 text-green-800'
+                            order.priority === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-green-100 text-green-800'
                             }`}>
                             {order.priority}
                           </span>

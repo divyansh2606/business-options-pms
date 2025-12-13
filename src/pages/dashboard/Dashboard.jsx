@@ -22,6 +22,7 @@ export default function Dashboard() {
 
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [data, setData] = useState({
     pms: [],
     recipe: [],
@@ -115,24 +116,39 @@ export default function Dashboard() {
         activeTab={activeTab}
         setActiveTab={handleTabChange}
         onLogout={handleLogout}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 ml-64 min-w-0 transition-all duration-300">
+      <div className="flex-1 md:ml-64 ml-0 min-w-0 transition-all duration-300">
         {/* Top Navigation Bar */}
-        <div className="bg-white shadow-sm sticky top-0 z-20 px-8 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">{getActiveTabLabel()}</h1>
-            <p className="text-sm text-gray-500">Welcome back, {user.name}</p>
+        <div className="bg-white shadow-sm sticky top-0 z-20 px-4 md:px-8 py-4 flex justify-between items-center">
+          <div className="flex items-center">
+            {/* Hamburger Menu (Mobile Only) */}
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="mr-4 text-gray-600 hover:text-indigo-600 md:hidden focus:outline-none"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-gray-800">{getActiveTabLabel()}</h1>
+              <p className="hidden md:block text-sm text-gray-500">Welcome back, {user.name}</p>
+            </div>
           </div>
-          <div className="flex items-center space-x-4">
+
+          <div className="flex items-center space-x-2 md:space-x-4">
             <button
               onClick={handleRefreshData}
-              className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center shadow-md hover:shadow-lg transform hover:scale-105"
+              className="px-3 md:px-5 py-2 md:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center shadow-md hover:shadow-lg transform hover:scale-105 text-sm md:text-base"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5 mr-2"
+                className="h-4 w-4 md:h-5 md:w-5 mr-1 md:mr-2"
                 viewBox="0 0 20 20"
                 fill="currentColor"
               >
@@ -142,20 +158,21 @@ export default function Dashboard() {
                   clipRule="evenodd"
                 />
               </svg>
-              Refresh Data
+              <span className="hidden md:inline">Refresh Data</span>
+              <span className="md:hidden">Refresh</span>
             </button>
-            <div className="h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-lg border-2 border-indigo-200">
+            <div className="h-8 w-8 md:h-10 md:w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-base md:text-lg border-2 border-indigo-200">
               {user.name.charAt(0)}
             </div>
           </div>
         </div>
 
         {/* Dynamic Content Rendering */}
-        <div className="p-8">
+        <div className="p-4 md:p-8">
           {loading ? (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full min-h-[50vh]">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
+                <div className="animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
                 <p className="text-gray-600 font-medium">Loading data...</p>
               </div>
             </div>

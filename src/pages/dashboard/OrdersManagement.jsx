@@ -2,17 +2,17 @@ import React, { useState } from 'react';
 
 export default function OrdersManagement({ data }) {
   const [statusFilter, setStatusFilter] = useState('all');
-  
+
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-xl shadow-lg">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 md:gap-0">
           <h3 className="text-lg font-semibold">Orders Management</h3>
-          <div className="flex space-x-3">
-            <select 
+          <div className="flex space-x-3 w-full md:w-auto">
+            <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border rounded-lg"
+              className="flex-1 md:flex-none px-4 py-2 border rounded-lg"
             >
               <option value="all">All Status</option>
               <option value="pending">Pending</option>
@@ -20,12 +20,12 @@ export default function OrdersManagement({ data }) {
               <option value="ready">Ready</option>
               <option value="delivered">Delivered</option>
             </select>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            <button className="flex-1 md:flex-none px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
               Add New Order
             </button>
           </div>
         </div>
-        
+
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
