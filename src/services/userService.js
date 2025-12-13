@@ -1,162 +1,133 @@
-// User Service - localStorage-based user management
-const STORAGE_KEY = 'pms_users';
+// User Service - Google Sheets backend authentication
+import * as userAPI from '../api/userAPI';
 
-// Default CEO user
-const DEFAULT_CEO = {
-    id: 'ceo_001',
-    name: 'ceo',
-    mobile: '',
-    password: 'password123',
-    role: 'ceo',
-    status: 'active',
-    createdAt: new Date().toISOString()
-};
+// Cache for users to reduce API calls
+let usersCache = null;
+let cacheTimestamp = null;
+const CACHE_DURATION = 30000; // 30 seconds
 
-// Initialize storage with default CEO if empty
-const initializeStorage = () => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify([DEFAULT_CEO]));
-        return [DEFAULT_CEO];
+// Initialize and get users from backend
+const getUsers = async () => {
+    // Check cache first
+    const now = Date.now();
+    if (usersCache && cacheTimestamp && (now - cacheTimestamp < CACHE_DURATION)) {
+        return usersCache;
     }
-    return JSON.parse(stored);
+    
+    try {
+        const users = await userAPI.getUsers();
+        usersCache = users;
+        cacheTimestamp = now;
+        return users;
+    } catch (error) {
+        console.error('Error fetching users:', error);
+        
+        // Fallback to default CEO if API fails
+        return [{
+            id: 'ceo_001',
+            name: 'ceo',
+            mobile: '',
+            password: 'password123',
+            role: 'ceo',
+            status: 'active',
+            createdAt: new Date().toISOString()
+        }];
+    }
 };
 
-// Get all users
-export const getUsers = () => {
-    return initializeStorage();
+// Clear cache
+const clearCache = () => {
+    usersCache = null;
+    cacheTimestamp = null;
 };
 
 // Get all employees (exclude CEO)
-export const getEmployees = () => {
-    const users = getUsers();
+export const getEmployees = async () => {
+    const users = await getUsers();
     return users.filter(user => user.role === 'employee');
 };
 
 // Add new user (employee)
-export const addUser = (userData) => {
-    const users = getUsers();
-
-    // Check if user with same name and mobile exists
-    const exists = users.find(
-        u => u.name.toLowerCase() === userData.name.toLowerCase() && u.mobile === userData.mobile
-    );
-
-    if (exists) {
-        return { success: false, message: 'User with same name and mobile already exists' };
+export const addUser = async (userData) => {
+    try {
+        const result = await userAPI.addUser(userData);
+        if (result.success) {
+            clearCache(); // Clear cache to force refresh
+        }
+        return result;
+    } catch (error) {
+        return { 
+            success: false, 
+            message: 'Network error. Could not add user.' 
+        };
     }
-
-    const newUser = {
-        id: `emp_${Date.now()}`,
-        name: userData.name,
-        mobile: userData.mobile,
-        password: userData.password,
-        role: 'employee',
-        status: 'active',
-        createdAt: new Date().toISOString()
-    };
-
-    users.push(newUser);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
-
-    return { success: true, message: 'User created successfully', user: newUser };
 };
 
 // Update user
-export const updateUser = (userId, userData) => {
-    const users = getUsers();
-    const index = users.findIndex(u => u.id === userId);
-
-    if (index === -1) {
-        return { success: false, message: 'User not found' };
+export const updateUser = async (userId, userData) => {
+    try {
+        const result = await userAPI.updateUser(userId, userData);
+        if (result.success) {
+            clearCache();
+        }
+        return result;
+    } catch (error) {
+        return { 
+            success: false, 
+            message: 'Network error. Could not update user.' 
+        };
     }
-
-    // Prevent editing CEO role
-    if (users[index].role === 'ceo' && userData.role !== 'ceo') {
-        return { success: false, message: 'Cannot change CEO role' };
-    }
-
-    users[index] = {
-        ...users[index],
-        name: userData.name || users[index].name,
-        mobile: userData.mobile || users[index].mobile,
-        password: userData.password || users[index].password,
-        status: userData.status || users[index].status,
-        updatedAt: new Date().toISOString()
-    };
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
-
-    return { success: true, message: 'User updated successfully', user: users[index] };
 };
 
 // Delete user
-export const deleteUser = (userId) => {
-    const users = getUsers();
-    const user = users.find(u => u.id === userId);
-
-    if (!user) {
-        return { success: false, message: 'User not found' };
-    }
-
-    // Prevent deleting CEO
-    if (user.role === 'ceo') {
-        return { success: false, message: 'Cannot delete CEO account' };
-    }
-
-    const filteredUsers = users.filter(u => u.id !== userId);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredUsers));
-
-    return { success: true, message: 'User deleted successfully' };
-};
-
-// Validate login credentials
-export const validateCredentials = (userType, name, mobile, password) => {
-    const users = getUsers();
-
-    if (userType === 'ceo') {
-        const ceo = users.find(u => u.role === 'ceo');
-        if (ceo && ceo.name === name && ceo.password === password) {
-            return {
-                success: true,
-                user: { name: 'CEO', role: 'ceo', mobile }
-            };
+export const deleteUser = async (userId) => {
+    try {
+        const result = await userAPI.deleteUser(userId);
+        if (result.success) {
+            clearCache();
         }
-        return { success: false, message: 'Invalid CEO credentials' };
-    }
-
-    // Employee login
-    const employee = users.find(
-        u => u.role === 'employee' &&
-            u.name === name &&
-            u.mobile === mobile &&
-            u.password === password &&
-            u.status === 'active'
-    );
-
-    if (employee) {
-        return {
-            success: true,
-            user: { name: employee.name, role: 'employee', mobile: employee.mobile }
+        return result;
+    } catch (error) {
+        return { 
+            success: false, 
+            message: 'Network error. Could not delete user.' 
         };
     }
+};
 
-    return { success: false, message: 'Invalid employee credentials' };
+// Validate login credentials (now using backend API)
+export const validateCredentials = async (userType, name, mobile, password) => {
+    try {
+        const result = await userAPI.validateCredentials(userType, name, mobile, password);
+        return result;
+    } catch (error) {
+        console.error('Validation error:', error);
+        return { 
+            success: false, 
+            message: 'Network error. Please check your connection and try again.' 
+        };
+    }
 };
 
 // Toggle user status (active/inactive)
-export const toggleUserStatus = (userId) => {
-    const users = getUsers();
-    const index = users.findIndex(u => u.id === userId);
-
-    if (index === -1) {
-        return { success: false, message: 'User not found' };
+export const toggleUserStatus = async (userId) => {
+    try {
+        const users = await getUsers();
+        const user = users.find(u => u.id === userId);
+        
+        if (!user) {
+            return { success: false, message: 'User not found' };
+        }
+        
+        const result = await userAPI.toggleUserStatus(userId, user.status);
+        if (result.success) {
+            clearCache();
+        }
+        return result;
+    } catch (error) {
+        return { 
+            success: false, 
+            message: 'Network error. Could not update user status.' 
+        };
     }
-
-    users[index].status = users[index].status === 'active' ? 'inactive' : 'active';
-    users[index].updatedAt = new Date().toISOString();
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
-
-    return { success: true, message: 'User status updated', user: users[index] };
 };

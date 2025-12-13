@@ -9,24 +9,34 @@ export default function LoginPage() {
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
-    if (!userType || !name || !mobile || !password) {
-      setError("Please fill all fields");
+    if (!userType || !name || !password) {
+      setError("Please fill all required fields");
+      setLoading(false);
       return;
     }
 
-    // Use userService for dynamic credential validation
-    const result = validateCredentials(userType, name, mobile, password);
+    try {
+      // Use userService for dynamic credential validation (now async)
+      const result = await validateCredentials(userType, name, mobile, password);
 
-    if (result.success) {
-      navigate("/dashboard", { state: { user: result.user } });
-    } else {
-      setError(result.message);
+      if (result.success) {
+        navigate("/dashboard", { state: { user: result.user } });
+      } else {
+        setError(result.message);
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError("Network error. Please check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -119,9 +129,10 @@ export default function LoginPage() {
             {/* LOGIN BUTTON - GREEN */}
             <button
               type="submit"
-              className="w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              disabled={loading}
+              className="w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              Login
+              {loading ? "Logging in..." : "Login"}
             </button>
 
           </form>

@@ -16,9 +16,14 @@ export default function Settings() {
     }
   }, [activeSection]);
 
-  const loadEmployees = () => {
-    const empList = getEmployees();
-    setEmployees(empList);
+  const loadEmployees = async () => {
+    try {
+      const empList = await getEmployees();
+      setEmployees(empList);
+    } catch (error) {
+      console.error('Error loading employees:', error);
+      showNotification('error', 'Failed to load employees');
+    }
   };
 
   const showNotification = (type, message) => {
@@ -43,7 +48,7 @@ export default function Settings() {
     setFormData({ name: '', mobile: '', password: '' });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!formData.name || !formData.mobile || (!editingUser && !formData.password)) {
@@ -51,41 +56,56 @@ export default function Settings() {
       return;
     }
 
-    let result;
-    if (editingUser) {
-      result = updateUser(editingUser.id, formData);
-    } else {
-      result = addUser(formData);
-    }
+    try {
+      let result;
+      if (editingUser) {
+        result = await updateUser(editingUser.id, formData);
+      } else {
+        result = await addUser(formData);
+      }
 
-    if (result.success) {
-      showNotification('success', result.message);
-      loadEmployees();
-      handleCloseModal();
-    } else {
-      showNotification('error', result.message);
+      if (result.success) {
+        showNotification('success', result.message);
+        await loadEmployees();
+        handleCloseModal();
+      } else {
+        showNotification('error', result.message);
+      }
+    } catch (error) {
+      console.error('Error saving user:', error);
+      showNotification('error', 'Network error. Could not save user.');
     }
   };
 
-  const handleDelete = (userId) => {
+  const handleDelete = async (userId) => {
     if (window.confirm('Are you sure you want to delete this employee?')) {
-      const result = deleteUser(userId);
-      if (result.success) {
-        showNotification('success', result.message);
-        loadEmployees();
-      } else {
-        showNotification('error', result.message);
+      try {
+        const result = await deleteUser(userId);
+        if (result.success) {
+          showNotification('success', result.message);
+          await loadEmployees();
+        } else {
+          showNotification('error', result.message);
+        }
+      } catch (error) {
+        console.error('Error deleting user:', error);
+        showNotification('error', 'Network error. Could not delete user.');
       }
     }
   };
 
-  const handleToggleStatus = (userId) => {
-    const result = toggleUserStatus(userId);
-    if (result.success) {
-      showNotification('success', result.message);
-      loadEmployees();
-    } else {
-      showNotification('error', result.message);
+  const handleToggleStatus = async (userId) => {
+    try {
+      const result = await toggleUserStatus(userId);
+      if (result.success) {
+        showNotification('success', result.message);
+        await loadEmployees();
+      } else {
+        showNotification('error', result.message);
+      }
+    } catch (error) {
+      console.error('Error toggling user status:', error);
+      showNotification('error', 'Network error. Could not update user status.');
     }
   };
 
