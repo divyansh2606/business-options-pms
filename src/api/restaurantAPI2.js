@@ -1,16 +1,10 @@
-// src/api/restaurantAPI2.js - Apps Script Method (with MENU options + WRITE support)
-// NOTE:
-//  - "PMS" sheet => actual data (meal blocks + items)
-//  - "MENU" sheet => dropdown master values (Clients / Dates etc.)
-//  - JSON POST -> doPost -> handleJsonUpdate (Apps Script)
+// src/api/restaurantAPI2.js - Apps Script Method (with MENU options)
 
-// Web App URL (Apps Script deployment)
-const APPS_SCRIPT_URL ="https://script.google.com/macros/s/AKfycbypM0CI6PA5ycn7TummTWIxwCXfkC6J33QYqowmR1qXJIqXcbPrV25zddzCanAOZb97/exec";
-// -------------------- COMMON FETCH HELPER (GET) --------------------
-
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbwD578gGk2BsAh75zIQOr2sw9YZ3WiIMF80Gg6Xy_bj4vUXosJoXkRhWB-G2XUAefju/exec";
 async function fetchSheetData(sheetName) {
   try {
-    const url = `${APPS_SCRIPT_URL}?sheet=${encodeURIComponent(sheetName)}`;
+    const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}`;
 
     console.log(`📡 Fetching "${sheetName}" from Apps Script...`);
 
@@ -36,14 +30,12 @@ async function fetchSheetData(sheetName) {
   }
 }
 
-// -------------------- PMS DATA (READ) --------------------
-
+// ----- PMS DATA (actual menu + items) -----
 export const fetchPMSData = async () => {
   console.log("🔄 Fetching PMS Data via Apps Script...");
   const data = await fetchSheetData("PMS");
   console.log(`✅ TOTAL PMS ROWS: ${data.length}`);
 
-  // Optional debug
   if (data.length > 50) {
     console.log("🔍 Sample row[50]:", data[50]);
   }
@@ -51,20 +43,13 @@ export const fetchPMSData = async () => {
   return data;
 };
 
-// -------------------- RECIPE DATA (READ) --------------------
-
+// ----- RECIPE DATA -----
 export const fetchRecipeData = async () => {
   console.log("🔄 Fetching Recipe Data...");
   return await fetchSheetData("P Vs A (Recipe)");
 };
 
-// -------------------- MENU OPTIONS (READ) --------------------
-// Assumption: "MENU" sheet me columns something like:
-// Row 1: headers
-// Col A: Meal names   (Breakfast, Lunch, Dinner...)   [optional]
-// Col B: Client names (Millennium, Cipla, ...)        [used]
-// Col C: Dates / other options                        [used]
-
+// ----- MENU OPTIONS -----
 export const fetchMenuOptions = async () => {
   console.log("🔄 Fetching MENU (dropdown options)...");
   const rows = await fetchSheetData("MENU");
@@ -80,16 +65,9 @@ export const fetchMenuOptions = async () => {
     const client = row[1];
     const date = row[2];
 
-    // idx > 0 => header row skip
-    if (meal && idx > 0) {
-      mealSet.add(meal.toString().trim());
-    }
-    if (client && idx > 0) {
-      clientSet.add(client.toString().trim());
-    }
-    if (date && idx > 0) {
-      dateSet.add(date.toString().trim());
-    }
+    if (meal && idx > 0) mealSet.add(meal.toString().trim());
+    if (client && idx > 0) clientSet.add(client.toString().trim());
+    if (date && idx > 0) dateSet.add(date.toString().trim());
   });
 
   const meals = Array.from(mealSet).filter(Boolean).sort();
@@ -103,58 +81,113 @@ export const fetchMenuOptions = async () => {
   return { meals, clients, dates };
 };
 
-// -------------------- PMS DATA (WRITE) --------------------
-// JSON POST -> Apps Script doPost -> handleJsonUpdate
-//
-// updates = [
-//   { rowIndex: 4, colIndex: 7, value: 123 }, // 0-based indices
-//   ...
-// ]
-//
-// NOTE:
-//  - rowIndex / colIndex yaha 0-based hai
-//  - Apps Script me +1 karke sheet me likh raha hai
-
-export const updatePMSCells = async (updates, sheetName = "PMS") => {
+// ----- EXISTING: batch cell updates (planned/actual etc.) -----
+export const updatePMSCells = async (updates) => {
   try {
-    if (!Array.isArray(updates) || updates.length === 0) {
-      console.warn("⚠️ updatePMSCells called with empty updates array");
-      return { success: false, error: "No updates provided" };
-    }
+    const body = {
+      sheet: "PMS",
+      updates, // [ {rowIndex, colIndex, value}, ... ]
+    };
 
-    console.log("✏️ Sending PMS updates:", updates);
-
-    const response = await fetch(APPS_SCRIPT_URL, {
+    const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sheet: sheetName,
-        updates,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
 
-    if (!response.ok) {
-      console.error("❌ HTTP error while updating PMS:", response.status);
-      return { success: false, error: "HTTP " + response.status };
+    const data = await res.json();
+    console.log("💾 updatePMSCells response:", data);
+    return data;
+  } catch (err) {
+    console.error("❌ Error in updatePMSCells:", err);
+    throw err;
+  }
+};
+
+// ----- Helper: Convert cell reference like "B2" to {row: 1, col: 1} (0-indexed) -----
+const cellRefToIndex = (cellRef) => {
+  const match = cellRef.match(/^([A-Z]+)(\d+)$/);
+  if (!match) return null;
+
+  const colLetters = match[1];
+  const rowNum = parseInt(match[2]);
+
+  // Convert column letters to index (A=0, B=1, ..., Z=25, AA=26, etc.)
+  let colIndex = 0;
+  for (let i = 0; i < colLetters.length; i++) {
+    colIndex = colIndex * 26 + (colLetters.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
+  }
+  colIndex--; // Make it 0-indexed
+
+  return { rowIndex: rowNum - 1, colIndex }; // 0-indexed
+};
+
+// ----- NEW: dropdown control from frontend (uses GET to avoid CORS preflight) -----
+export const updatePMSDropdown = async ({ sheet, dropdownCell, value }) => {
+  try {
+    // Convert cell reference to row/col indices
+    const indices = cellRefToIndex(dropdownCell);
+    if (!indices) {
+      throw new Error(`Invalid cell reference: ${dropdownCell}`);
     }
 
-    const data = await response.json();
-    console.log("✅ PMS update response:", data);
+    console.log(`🔁 Updating ${dropdownCell} (row:${indices.rowIndex}, col:${indices.colIndex}) to "${value}"`);
+
+    // Use GET request with URL parameters to avoid CORS preflight
+    const params = new URLSearchParams({
+      action: 'update',
+      sheet: sheet,
+      row: indices.rowIndex.toString(), // 0-indexed, Apps Script adds +1
+      col: indices.colIndex.toString(), // 0-indexed, Apps Script adds +1
+      value: value
+    });
+
+    const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
+
+    const res = await fetch(url, {
+      method: "GET",
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+
+    const data = await res.json();
+    console.log("🔁 Dropdown update response:", data);
 
     if (data.error) {
-      console.error("❌ Apps Script update error:", data.error);
+      throw new Error(data.error);
     }
 
     return data;
   } catch (err) {
-    console.error("❌ updatePMSCells exception:", err);
-    return { success: false, error: err.toString() };
+    console.error("❌ Error in updatePMSDropdown:", err);
+    throw err;
   }
 };
 
-// (optional helper – single cell update)
-// export const updateSinglePMSCell = async (rowIndex, colIndex, value, sheetName = "PMS") => {
-//   return updatePMSCells([{ rowIndex, colIndex, value }], sheetName);
-// };
+// ----- NEW: Direct Cell Update (for auto-save) -----
+export const updateCell = async (sheet, rowIndex, colIndex, value) => {
+  try {
+    console.log(`🔁 Auto-Saving (row:${rowIndex}, col:${colIndex}) -> "${value}"`);
+
+    // ✅ Fix: User reported +1 was "too low" (updating row below).
+    // Reverting to rowIndex directly for row.
+    const params = new URLSearchParams({
+      action: 'update',
+      sheet: sheet,
+      row: rowIndex.toString(), // ✅ Fix: Removing +1
+      col: (colIndex + 1).toString(), // Keep +1 for Column
+      value: value
+    });
+
+    const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
+
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error("❌ Error in updateCell:", err);
+    throw err;
+  }
+};

@@ -107,3 +107,67 @@ export const fetchPMSData = async () => {
 export const fetchRecipeData = async () => {
     return [];
 };
+
+// Helper to format date consistently
+const formatDate = (date) => {
+    if (!date) return "";
+    const d = new Date(date);
+    if (isNaN(d)) return date.toString().trim();
+
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = d.toLocaleString("en-US", { month: "short" });
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+};
+
+// Fetch MENU options using Google Visualization API (works without sheet open)
+export const fetchMenuOptions = async () => {
+    console.log("🔄 Fetching MENU options (CSV v3)...");
+    const rows = await fetchCompleteSheetData("MENU");
+
+    const mealSet = new Set();
+    const clientSet = new Set();
+    const dateSet = new Set();
+
+    rows.forEach((row, idx) => {
+        if (!row || row.length === 0) return;
+        if (idx === 0) return; // Skip header row
+
+        const meal = row[0];
+        const client = row[1];
+        const date = row[2];
+
+        if (meal) mealSet.add(meal.toString().trim());
+        if (client) clientSet.add(client.toString().trim());
+        if (date) {
+            // Try to format date consistently
+            const trimmed = date.toString().trim();
+            if (trimmed) {
+                // Check if it looks like a date
+                const parsed = new Date(trimmed);
+                if (!isNaN(parsed)) {
+                    dateSet.add(formatDate(parsed));
+                } else {
+                    dateSet.add(trimmed);
+                }
+            }
+        }
+    });
+
+    const meals = Array.from(mealSet).filter(Boolean).sort();
+    const clients = Array.from(clientSet).filter(Boolean).sort();
+    // Sort dates chronologically (not alphabetically)
+    const dates = Array.from(dateSet).filter(Boolean).sort((a, b) => {
+        const dateA = new Date(a);
+        const dateB = new Date(b);
+        if (isNaN(dateA)) return 1;
+        if (isNaN(dateB)) return -1;
+        return dateA - dateB;
+    });
+
+    console.log("🍽️ MENU Meals:", meals);
+    console.log("🏢 MENU Clients:", clients);
+    console.log("📅 MENU Dates:", dates);
+
+    return { meals, clients, dates };
+};

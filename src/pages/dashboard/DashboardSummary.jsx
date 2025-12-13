@@ -1,9 +1,11 @@
-// DashboardSummary.jsx - Systematic PMS View (Meals → Dishes → Ingredients) + Save button
+// DashboardSummary.jsx - Systematic PMS View (Meals → Dishes → Ingredients) + Save + Sheet Dropdown Control
+
 import React, { useState, useEffect } from "react";
+import { fetchMenuOptions } from "../../api/restaurantAPI3"; // CSV API for menu options (static list)
 import {
-  fetchPMSData,
-  fetchMenuOptions,
-  updatePMSCells,
+  fetchPMSData, // Apps Script - triggers live sheet recalculation
+  updatePMSDropdown,
+  updateCell,
 } from "../../api/restaurantAPI2";
 
 // ----------------------- helpers -----------------------
@@ -11,12 +13,8 @@ import {
 // hamesha "dd-MMM-yyyy" return karega (e.g. 07-Dec-2025)
 const formatDate = (date) => {
   if (!date) return "";
-
   const d = new Date(date);
-  if (isNaN(d)) {
-    // fallback: raw string hi dikha do
-    return date.toString().trim();
-  }
+  if (isNaN(d)) return date.toString().trim();
 
   const day = String(d.getDate()).padStart(2, "0");
   const month = d.toLocaleString("en-US", { month: "short" });
@@ -27,308 +25,251 @@ const formatDate = (date) => {
 const isNumericCell = (v) => {
   if (v === null || v === undefined || v === "") return false;
   if (typeof v === "number") return !isNaN(v);
-  const n = Number(v);
-  return !isNaN(n);
+  return !isNaN(Number(v));
 };
 
-// -------- FIXED: detect meal header ANYWHERE in row --------
+// PMS sheet ko parse karo and meals extract karo
 const extractHeaderInfo = (row) => {
-  if (!row || row.length === 0) return null;
+  if (!row) return null;
 
-  const mealKeywords = [
-    "morning",
-    "breakfast",
-    "lunch",
-    "evening",
-    "evening snacks",
-    "dinner",
-  ];
+  // More robust keyword matching
+  const mealRegex = /^(morning|breakfast|lunch|evening|evening snacks|dinner)/i;
 
-  let meal = null;
-  let pax = null;
-  let date = null;
-  let client = null;
+  let meal = null,
+    date = null,
+    pax = null,
+    client = null;
 
   row.forEach((cell) => {
-    if (cell == null || cell === "") return;
+    if (!cell) return;
 
     const str = cell.toString().trim();
-    const lower = str.toLowerCase();
+    if (!str) return;
 
-    // 🎯 MEAL: row me kahin bhi ho sakta hai
-    if (!meal && mealKeywords.includes(lower)) {
-      meal = str;
-      return;
+    // Check Meal
+    if (!meal && mealRegex.test(str)) {
+      meal = str; // Keep original casing/string
     }
-
-    // 📅 DATE
-    if (!date) {
-      // direct parse
-      const d = new Date(str);
-      if (!isNaN(d) && d.getFullYear() > 2000 && d.getFullYear() < 2100) {
-        date = formatDate(d);
-        return;
+    // Check Date
+    else if (!date && !isNaN(new Date(str)) && str.length > 5 && str.includes("-")) {
+      // Basic heuristic for date string like "07-Dec-2025" or "2025-12-07"
+      date = formatDate(new Date(str));
+    }
+    // Check Pax (Number > 10)
+    else if (!pax && !isNaN(str) && Number(str) > 10 && Number(str) < 50000) {
+      pax = Number(str);
+    }
+    // Check Client (Not meal, not date, not number)
+    else if (!client && !mealRegex.test(str) && str !== date && isNaN(str) && str.length > 2) {
+      // Exclude common header keywords if any
+      if (!["date", "pax", "party", "venue"].includes(str.toLowerCase())) {
+        client = str;
       }
-    }
-
-    // 🔢 PERSONS (PAX)
-    if (pax == null && isNumericCell(str)) {
-      const num = Number(str);
-      if (num > 10 && num < 50000) {
-        pax = num;
-        return;
-      }
-    }
-
-    // 🏢 CLIENT: last non-numeric, non-date, non-meal text
-    if (!isNumericCell(str) && !mealKeywords.includes(lower) && str !== date) {
-      client = str;
     }
   });
 
-  if (!meal) return null; // header hi nahi
-
-  return {
-    meal,
-    client: client || "",
-    pax,
-    date: date || "",
-  };
+  if (!meal) return null;
+  return { meal, date, pax, client };
 };
 
-// PMS sheet ko parse karo – har meal block ke liye:
-// { meal, date, client, pax, items: [ { name, planned, actual, diff, unit, actualCell, ingredients: [...] } ] }
 const parsePMSSheet = (rows) => {
   const menus = [];
   console.log("🔍 Parsing PMS sheet, total rows:", rows.length);
 
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || row.every((cell) => cell === "" || cell == null)) continue;
-
-    const header = extractHeaderInfo(row);
+    const header = extractHeaderInfo(rows[i]);
     if (!header) continue;
 
-    console.log(
-      `🎯 Meal header @ row ${i}:`,
-      header.meal,
-      "|",
-      header.date,
-      "|",
-      header.client,
-      "| pax:",
-      header.pax
-    );
+    console.log("🎯 Meal header found at row", i, ":", header);
 
-    // dishes ka naam wali row: header ke 2 row niche
-    const itemsRowIndex = i + 2;
-    const itemsRow = rows[itemsRowIndex];
-    if (!itemsRow) continue;
+    // 1️⃣ Step 1: Identify "Main Dishes" (Columns)
+    // SEARCH for the header row in the next few rows (i+1 to i+6)
+    // It usually contains multiple text items like "Dal", "Paneer", "Item X"
+    let itemsRow = null;
+    let itemsRowIndex = -1;
 
-    // ---------- Dish headers row (actual dish names in Item 1, Item 2...) ----------
-    const dishHeaders = [];
-    for (let col = 0; col < itemsRow.length; col++) {
-      const raw = itemsRow[col];
-      const name = raw?.toString().trim();
-      if (
-        !name ||
-        name === "" ||
-        /^item\s*\d*/i.test(name) ||
-        name === "#N/A"
-      ) {
-        continue;
-      }
-      dishHeaders.push({ col, name });
-    }
+    for (let offset = 1; offset <= 6; offset++) {
+      const r = i + offset;
+      if (r >= rows.length) break;
+      const candidateRow = rows[r];
+      if (!candidateRow) continue;
 
-    if (dishHeaders.length === 0) continue;
-    console.log("🍛 Dish headers:", dishHeaders);
+      // Check if this row looks like a header (has multiple text values)
+      const textCount = candidateRow.filter(c =>
+        c && c.toString().trim().length > 2 &&
+        isNaN(Number(c)) &&
+        c !== "#N/A" &&
+        !["planned", "actual", "p", "a", "qty"].includes(c.toString().toLowerCase())
+      ).length;
 
-    // ---------- Dish Planned/Actual/Unit ----------
-    const dishesWithMeta = dishHeaders.map((dish) => {
-      const col = dish.col;
-      let planned = 0;
-      let actual = 0;
-      let unit = "";
-      let actualCell = null;
-
-      for (
-        let r = itemsRowIndex + 1;
-        r <= itemsRowIndex + 10 && r < rows.length;
-        r++
-      ) {
-        const dataRow = rows[r];
-        if (!dataRow) continue;
-
-        const pCell = dataRow[col];
-        const aCell = dataRow[col + 1];
-        const uCell = dataRow[col + 3];
-
-        const hasNumeric = isNumericCell(pCell) || isNumericCell(aCell);
-        if (!hasNumeric) continue;
-
-        planned = isNumericCell(pCell) ? Number(pCell) : 0;
-        actual = isNumericCell(aCell) ? Number(aCell) : 0;
-        unit = (uCell || "").toString().trim();
-
-        actualCell = { rowIndex: r, colIndex: col + 1 };
-
-        console.log(
-          `📦 Dish @ row ${r}, col ${col}:`,
-          dish.name,
-          "| P:",
-          planned,
-          "A:",
-          actual,
-          "U:",
-          unit
-        );
+      // If we see at least 2 text columns, assume it's the dish header
+      if (textCount >= 2) {
+        itemsRow = candidateRow;
+        itemsRowIndex = r;
         break;
       }
+    }
 
-      const diff = planned - actual;
+    if (!itemsRow) {
+      continue;
+    }
 
-      return {
-        ...dish,
-        planned,
-        actual,
-        diff,
-        unit,
-        actualCell,
-      };
+    const dishHeaders = [];
+    // ✅ User Requirement: "Row 2 has Item 1, Row 3 has Actual Name"
+    // So if itemsRow is Row 2, we grab names from Row 3 (itemsRowIndex + 1)
+    const namesRow = rows[itemsRowIndex + 1];
+
+    itemsRow.forEach((cell, col) => {
+      // We detect columns based on "Item 1", "Item 2" presence
+      if (cell && cell.toString().trim() && cell !== "#N/A") {
+
+        let dishName = cell.toString().trim(); // Default to "Item 1"
+
+        // Try to grab the actual name from the row below
+        if (namesRow && namesRow[col] && namesRow[col].toString().trim()) {
+          dishName = namesRow[col].toString().trim();
+        }
+
+        dishHeaders.push({ col, name: dishName, ingredients: [] });
+      }
     });
 
-    // ---------- Ingredients header row (common for all dishes in that meal) ----------
-    let ingHeaderIndex = null;
-    for (
-      let r = itemsRowIndex + 1;
-      r <= itemsRowIndex + 60 && r < rows.length;
-      r++
-    ) {
-      const hr = rows[r];
-      if (!hr) continue;
+    if (!dishHeaders.length) continue;
+    // console.log("🍛 Dish headers (Columns):", dishHeaders);
 
-      const lower = hr.map((c) =>
-        (c || "").toString().trim().toLowerCase()
-      );
+    // 2️⃣ Step 2: Grab "Dish Level" totals (Rows below item header)
+    // We scan columns relative to dish.col to find numbers
+    dishHeaders.forEach(dish => {
+      // Look for values in cols [dish.col, dish.col+1, dish.col+2]
+      // Often Name is at col, P at col+1, A at col+2.
+      // But if headers are merged, P might be at col.
 
-      const hasPlanned = lower.includes("planned");
-      const hasUnit = lower.includes("unit");
-      const countItemName = lower.filter((c) => c === "item name").length;
+      // Scan a few rows BELOW the itemsRowIndex
+      for (let r = itemsRowIndex + 1; r < itemsRowIndex + 5 && r < rows.length; r++) {
+        const row = rows[r];
+        if (!row) continue;
 
-      // kam se kam 2 "Item Name" hone chahiye – tabhi ye ingredients header hai
-      if (countItemName >= 2 && hasPlanned && hasUnit) {
-        ingHeaderIndex = r;
-        console.log(
-          "🍲 Found ING header row @",
-          r,
-          "ItemName count:",
-          countItemName,
-          "=>",
-          hr
-        );
-        break;
-      }
-    }
+        // Check broad range to find "Dish Level" summary
+        const pCell = row[dish.col + 1]; // Try col+1 first?
+        const aCell = row[dish.col + 2];
+        const pCellAlt = row[dish.col]; // Fallback
 
-    let ingGroups = [];
-    if (ingHeaderIndex != null) {
-      const hr = rows[ingHeaderIndex];
-      for (let col = 0; col < hr.length; col++) {
-        const cell = (hr[col] || "").toString().trim().toLowerCase();
-        if (cell === "item name") {
-          ingGroups.push(col);
+        if (isNumericCell(pCell) || isNumericCell(aCell)) {
+          dish.planned = Number(pCell) || 0;
+          dish.actual = Number(aCell) || 0;
+          dish.actualCell = { rowIndex: r, colIndex: dish.col + 2 };
+          dish.unit = row[dish.col + 3]?.toString().trim() || "";
+          break;
+        } else if (isNumericCell(pCellAlt)) {
+          // Case where numbers start at dish.col
+          dish.planned = Number(pCellAlt) || 0;
+          dish.actual = Number(row[dish.col + 1]) || 0;
+          dish.actualCell = { rowIndex: r, colIndex: dish.col + 1 };
+          dish.unit = row[dish.col + 2]?.toString().trim() || "";
+          break;
         }
       }
-      console.log("🍱 Ingredient group start columns:", ingGroups);
-    }
+    });
 
-    const items = [];
+    // 3️⃣ Step 3: Process "Ingredients" (Rows 8+)
+    // Start significantly below items row to skip the "Planned/Actual" sub-headers
+    const startRowIndex = itemsRowIndex + 5;
 
-    // ---------- ek-ek dish ke ingredients ----------
-    dishesWithMeta.forEach((dish, idx) => {
-      let ingredients = [];
+    for (let r = startRowIndex; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || row.length === 0) break;
 
-      if (ingHeaderIndex != null && ingGroups.length > 0) {
-        // dish index ke hisab se group choose karo
-        const groupCol =
-          idx < ingGroups.length ? ingGroups[idx] : ingGroups[ingGroups.length - 1];
+      // Stop if it looks like a new meal header
+      // Using broad check to catch ANY generic keyword in first few cols
+      // to avoid processing "Dinner" block as ingredients of "Lunch"
+      const cell0 = row[0]?.toString().trim().toLowerCase();
+      if (
+        r > startRowIndex &&
+        /^(morning|breakfast|lunch|evening|dinner)/i.test(cell0)
+      ) {
+        break;
+      }
 
-        for (
-          let r = ingHeaderIndex + 1;
-          r < rows.length && r <= ingHeaderIndex + 200;
-          r++
-        ) {
-          const ir = rows[r];
-          if (!ir) continue;
+      // ✅ FIX: Look for Ingredient Data PER DISH (Locally)
+      // Do NOT look for a single global "IngredientName" in Col A (unless it extends).
+      // User Implies: Each Dish Block has its own ingredients logic.
 
-          const ingNameRaw = ir[groupCol];
-          const ingName = ingNameRaw?.toString().trim();
+      dishHeaders.forEach(dish => {
+        // We need to find: Name, Planned, Actual, Unit for THIS dish in THIS row.
+        // Heuristic: Name is usually the text string in the block.
+        // Columns in block: [dish.col, dish.col+1, dish.col+2, dish.col+3]
 
-          const plannedVal = ir[groupCol + 1];
-          const unitVal = ir[groupCol + 2];
-          const actualVal = ir[groupCol + 3];
+        let localName = "";
+        let pVal = 0, aVal = 0, uVal = "";
+        let actCell = null;
+        let foundData = false;
 
-          const rowAllEmpty =
-            !ingName &&
-            (plannedVal === "" || plannedVal == null) &&
-            (unitVal === "" || unitVal == null) &&
-            (actualVal === "" || actualVal == null);
+        // Try to identify structure in this block
+        const c0 = row[dish.col];     // Candidate Name?
+        const c1 = row[dish.col + 1]; // Candidate Planned?
+        const c2 = row[dish.col + 2]; // Candidate Actual?
+        const c3 = row[dish.col + 3]; // Candidate Unit?
 
-          if (rowAllEmpty) break;
-
-          if (
-            !ingName ||
-            ingName === "" ||
-            ingName === "#N/A" ||
-            ingName.toLowerCase() === "item name"
-          ) {
-            continue;
+        // Pattern 1: Name | Planned | Actual | Unit
+        // Name must be string, P/A numeric
+        if (c0 && isNaN(Number(c0)) && c0.toString().length > 1) {
+          localName = c0.toString().trim();
+          if (isNumericCell(c1) || isNumericCell(c2)) {
+            pVal = Number(c1) || 0;
+            aVal = Number(c2) || 0;
+            uVal = c3?.toString().trim() || "";
+            actCell = { rowIndex: r, colIndex: dish.col + 2 };
+            foundData = true;
           }
+        }
+        // Pattern 2: Maybe Name is in previous column? (dish.col - 1)
+        // If dish.col was derived from "Planned" column in header...
+        else {
+          const cPrev = row[dish.col - 1];
+          if (cPrev && isNaN(Number(cPrev)) && cPrev.toString().length > 1) {
+            localName = cPrev.toString().trim();
+            // Then P is likely at c0 (dish.col)
+            if (isNumericCell(c0) || isNumericCell(c1)) {
+              pVal = Number(c0) || 0;
+              aVal = Number(c1) || 0;
+              uVal = c2?.toString().trim() || "";
+              actCell = { rowIndex: r, colIndex: dish.col + 1 };
+              foundData = true;
+            }
+          }
+        }
 
-          const ingPlanned = isNumericCell(plannedVal)
-            ? Number(plannedVal)
-            : 0;
-          const ingActual = isNumericCell(actualVal)
-            ? Number(actualVal)
-            : 0;
-          const ingUnit = (unitVal || "").toString().trim();
-
-          ingredients.push({
-            name: ingName,
-            planned: ingPlanned,
-            actual: ingActual,
-            unit: ingUnit,
-            actualCell: {
-              rowIndex: r,
-              colIndex: groupCol + 3, // Actual column
-            },
+        if (foundData && localName) {
+          dish.ingredients.push({
+            name: localName,
+            planned: pVal,
+            actual: aVal,
+            unit: uVal,
+            actualCell: actCell,
+            diff: pVal - aVal
           });
         }
-      }
-
-      items.push({
-        name: dish.name,
-        planned: dish.planned,
-        actual: dish.actual,
-        diff: dish.diff,
-        unit: dish.unit,
-        actualCell: dish.actualCell,
-        ingredients,
       });
-    });
+    }
+
+    // Transform dishHeaders back to our standard "items" format
+    const items = dishHeaders.map(d => ({
+      name: d.name,
+      planned: d.planned || 0,
+      actual: d.actual || 0,
+      unit: d.unit || "",
+      actualCell: d.actualCell,
+      diff: (d.planned || 0) - (d.actual || 0),
+      ingredients: d.ingredients
+    }));
 
     menus.push({
       meal: header.meal,
       date: header.date,
       client: header.client,
-      pax: header.pax || "?",
+      pax: header.pax,
       items,
     });
-
-    console.log(
-      `✅ Menu added: ${header.meal} | ${header.date} | ${header.client} | items = ${items.length}`
-    );
   }
 
   console.log("📊 FINAL MENUS COUNT:", menus.length);
@@ -341,126 +282,183 @@ export default function DashboardSummary() {
   const [allMenus, setAllMenus] = useState([]);
   const [client, setClient] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
+  const [mealType, setMealType] = useState(""); // ✅ DYNAMIC
 
   const [clientOptions, setClientOptions] = useState([]);
   const [dateOptions, setDateOptions] = useState([]);
+  const [mealOptions, setMealOptions] = useState([]); // ✅ NEW: Dynamic meal options
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [pendingUpdates, setPendingUpdates] = useState({}); // key -> {rowIndex,colIndex,value}
+  const [autoSaving, setAutoSaving] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  // ✅ Auto-refresh mechanism (Polling every 60s)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      console.log("⏰ Auto-refreshing data...");
+      loadData(true); // pass true to indicate silent reload
+    }, 60000); // 60 seconds
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [pmsRows, menuOpts] = await Promise.all([
         fetchPMSData(),
         fetchMenuOptions(),
       ]);
 
-      const menus = parsePMSSheet(pmsRows || []);
+      const menus = parsePMSSheet(pmsRows);
+
       setAllMenus(menus);
 
-      let clients = menuOpts.clients || [];
-      let datesRaw = menuOpts.dates || [];
+      // ✅ Get dynamic values from MENU sheet or fallback to parsed data
+      const meals = menuOpts.meals.length
+        ? menuOpts.meals
+        : [...new Set(menus.map((m) => m.meal))].filter(Boolean);
 
-      if (clients.length === 0) {
-        const tmp = new Set();
-        menus.forEach((m) => {
-          if (m.client) tmp.add(m.client);
-        });
-        clients = Array.from(tmp);
-      }
+      const clients = menuOpts.clients.length
+        ? menuOpts.clients
+        : [...new Set(menus.map((m) => m.client))].filter(Boolean);
 
-      if (datesRaw.length === 0) {
-        const tmp = new Set();
-        menus.forEach((m) => {
-          if (m.date) tmp.add(m.date);
-        });
-        datesRaw = Array.from(tmp);
-      }
+      const dates = menuOpts.dates.length
+        ? menuOpts.dates.map(formatDate)
+        : [...new Set(menus.map((m) => m.date))].filter(Boolean).map(formatDate);
 
-      const dates = datesRaw
-        .map((d) => formatDate(d))
-        .filter(Boolean);
-
-      clients.sort();
-      dates.sort(
-        (a, b) =>
-          new Date(a.split("-").reverse().join("-")) -
-          new Date(b.split("-").reverse().join("-"))
-      );
-
+      setMealOptions(meals);
       setClientOptions(clients);
       setDateOptions(dates);
 
-      if (!client && clients.length > 0) setClient(clients[0]);
-      if (!selectedDate && dates.length > 0) setSelectedDate(dates[0]);
+      // ✅ SMART DEFAULT: Sync dropdowns to what is ALREADY in the sheet/parsed data
+      if (menus.length > 0) {
+        const current = menus[0];
+        if (!mealType) setMealType(current.meal);
+        if (!selectedDate) setSelectedDate(current.date);
+        if (!client) setClient(current.client);
+      } else {
+        // Fallback: Default to first option if no data parsed
+        if (!mealType && meals.length) setMealType(meals[0]);
+        if (!client && clients.length) setClient(clients[0]);
+        if (!selectedDate && dates.length) setSelectedDate(dates[0]);
+      }
 
-      console.log(
-        "📅 Parsed menus dates:",
-        menus.map((m) => `${m.date} | ${m.client} | ${m.meal}`)
-      );
+      console.log("📅 Parsed menus count:", menus.length);
     } catch (err) {
       console.error("❌ Error loading PMS/Menu:", err);
-      setAllMenus([]);
-      setClientOptions([]);
-      setDateOptions([]);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   useEffect(() => {
+    // Initial load
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Date + Client filter – same date/client ke sab meals (Morning, Lunch, Evening...)
-   const filteredMenus = allMenus.filter(
-    (m) => m.client?.toLowerCase() === client?.toLowerCase()
-  );
+  // ✅ Filter by all three: meal, date, client (Empty = All)
+  const filteredMenus = allMenus.filter((m) => {
+    const matchesMeal = !mealType || m.meal?.toLowerCase() === mealType?.toLowerCase();
+    const matchesDate = !selectedDate || m.date === selectedDate;
+    const matchesClient = !client || m.client?.toLowerCase() === client?.toLowerCase();
 
-  console.log("💡 All menus for client:", client, allMenus);
+    return matchesMeal && matchesDate && matchesClient;
+  });
 
-  const markUpdate = (cellMeta, newValue) => {
-    if (!cellMeta) return;
-    const { rowIndex, colIndex } = cellMeta;
-    const key = `${rowIndex}_${colIndex}`;
-    const val =
-      newValue === "" || newValue === null
-        ? ""
-        : isNaN(Number(newValue))
-        ? newValue
-        : Number(newValue);
+  console.log(`💡 Filtered menus: ${filteredMenus.length} / ${allMenus.length}`);
 
-    setPendingUpdates((prev) => ({
-      ...prev,
-      [key]: { rowIndex, colIndex, value: val },
-    }));
+  // 1️⃣ HANDLE MEAL CHANGE (Updates Sheet & Reloads)
+  const handleMealChange = async (e) => {
+    const newVal = e.target.value;
+    setMealType(newVal);
+
+    if (newVal) {
+      setLoading(true); // Show local loading
+      try {
+        await updatePMSDropdown({
+          sheet: "PMS",
+          dropdownCell: "B2",
+          value: newVal,
+        });
+        await loadData(); // 🚀 Force Reload Data
+      } catch (err) {
+        console.error("❌ Meal change failed:", err);
+        setLoading(false);
+      }
+    }
   };
 
-  const hasPending = Object.keys(pendingUpdates).length > 0;
+  // 2️⃣ HANDLE DATE CHANGE (Updates Sheet M1 & Reloads)
+  const handleDateChange = async (e) => {
+    const newVal = e.target.value;
+    setSelectedDate(newVal);
 
-  const handleSaveAll = async () => {
-    if (!hasPending) return;
-    setSaving(true);
-    try {
-      const updatesArray = Object.values(pendingUpdates);
-      console.log("💾 Sending updates:", updatesArray);
-      const res = await updatePMSCells(updatesArray);
-      console.log("💾 Save response:", res);
-      setPendingUpdates({});
-      await loadData();
-    } catch (e) {
-      console.error("❌ Error saving updates:", e);
+    if (newVal) {
+      setLoading(true);
+      try {
+        // Providing the string date.
+        // Apps Script might expect a specific format, but usually string works if cell is flexible.
+        await updatePMSDropdown({
+          sheet: "PMS",
+          dropdownCell: "M1", // Based on analysis of your sheet script
+          value: newVal
+        });
+        await loadData();
+      } catch (err) {
+        console.error("❌ Date change failed:", err);
+        setLoading(false);
+      }
     }
-    setSaving(false);
+  };
+
+  // 3️⃣ HANDLE CLIENT CHANGE (Updates Sheet Y1 & Reloads)
+  const handleClientChange = async (e) => {
+    const newVal = e.target.value;
+    setClient(newVal);
+
+    if (newVal) {
+      setLoading(true);
+      try {
+        // Assuming Y1 is Client based on `var client = sourceSheet.getRange("Y1").getValue()` in script
+        await updatePMSDropdown({
+          sheet: "PMS",
+          dropdownCell: "Y1",
+          value: newVal
+        });
+        await loadData();
+      } catch (err) {
+        console.error("❌ Client change failed:", err);
+        setLoading(false);
+      }
+    }
+  };
+
+  // 🔄 AUTO SAVE HANDLER
+  const handleAutoSave = async (cellMeta, newValue) => {
+    if (!cellMeta) return;
+
+    try {
+      setAutoSaving(true);
+      const { rowIndex, colIndex } = cellMeta;
+
+      console.log(`💾 Auto-saving cell R${rowIndex}C${colIndex} -> ${newValue}`);
+
+      await updateCell("PMS", rowIndex, colIndex, newValue);
+
+      setAutoSaving(false);
+    } catch (e) {
+      console.error("❌ Auto-save failed:", e);
+      setAutoSaving(false);
+      // alert("⚠️ Failed to save change. Please check connection.");
+    }
   };
 
   return (
     <div className="p-8 min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100">
+
       {/* Filters */}
       <div className="bg-white rounded-3xl shadow-2xl p-10 mb-8 border-4 border-indigo-200">
         <div className="flex flex-wrap items-end justify-center gap-10">
+
           {/* Date */}
           <div className="text-center">
             <label className="block text-2xl font-bold text-indigo-800 mb-3">
@@ -468,18 +466,12 @@ export default function DashboardSummary() {
             </label>
             <select
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-12 py-5 text-2xl border-4 border-indigo-600 rounded-2xl font-bold bg-gradient-to-r from-indigo-50 to-purple-50"
+              onChange={handleDateChange}
+              className="px-12 py-5 text-2xl border-4 border-indigo-600 rounded-2xl"
             >
-              {dateOptions.length > 0 ? (
-                dateOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))
-              ) : (
-                <option>No Dates</option>
-              )}
+              {dateOptions.map((d) => (
+                <option key={d}>{d}</option>
+              ))}
             </select>
           </div>
 
@@ -490,171 +482,210 @@ export default function DashboardSummary() {
             </label>
             <select
               value={client}
-              onChange={(e) => setClient(e.target.value)}
-              className="px-12 py-5 text-2xl border-4 border-indigo-600 rounded-2xl font-bold bg-gradient-to-r from-indigo-50 to-purple-50"
+              onChange={handleClientChange}
+              className="px-12 py-5 text-2xl border-4 border-indigo-600 rounded-2xl"
             >
-              {clientOptions.length > 0 ? (
-                clientOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))
-              ) : (
-                <option>No Clients</option>
-              )}
+              {clientOptions.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
             </select>
           </div>
 
-          {/* Reload */}
-          <button
-            onClick={loadData}
-            className="px-16 py-5 bg-gradient-to-r from-purple-700 to-indigo-800 text-white text-2xl font-extrabold rounded-3xl shadow-2xl hover:scale-110 transition transform"
-          >
-            RELOAD DATA
-          </button>
+          {/* Meal Type */}
+          <div className="text-center">
+            <label className="block text-2xl font-bold text-indigo-800 mb-3">
+              Meal Type
+            </label>
+            <select
+              value={mealType}
+              onChange={handleMealChange}
+              className="px-12 py-5 text-2xl border-4 border-orange-600 rounded-2xl"
+            >
+              {mealOptions.map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+          </div>
 
-          {/* Save All Changes */}
-          <button
-            onClick={handleSaveAll}
-            disabled={!hasPending || saving}
-            className={`px-16 py-5 text-2xl font-extrabold rounded-3xl shadow-2xl transition transform ${
-              hasPending && !saving
-                ? "bg-green-600 text-white hover:scale-110"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed"
-            }`}
-          >
-            {saving ? "SAVING..." : "SAVE ALL CHANGES"}
-          </button>
+          {/* Reload / Status */}
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => loadData(false)}
+              className="px-16 py-5 bg-purple-800 text-white text-2xl font-extrabold rounded-3xl shadow-xl hover:bg-purple-900 transition-colors"
+            >
+              RELOAD DATA
+            </button>
+            {autoSaving && (
+              <p className="text-center text-green-600 font-bold animate-pulse">
+                💾 Saving...
+              </p>
+            )}
+          </div>
         </div>
-
-        {hasPending && !saving && (
-          <p className="mt-4 text-center text-lg text-orange-600 font-semibold">
-            You have unsaved changes. Click "SAVE ALL CHANGES" to update Google
-            Sheet.
-          </p>
-        )}
       </div>
 
-      {/* Data Display */}
+      {/* Data */}
       {loading ? (
-        <div className="text-center py-64">
-          <div className="inline-block animate-spin rounded-full h-40 w-40 border-t-16 border-b-16 border-purple-600"></div>
-          <p className="mt-16 text-6xl font-bold text-purple-800">
-            Loading PMS...
-          </p>
-        </div>
+        <p className="text-center text-4xl py-64">Loading...</p>
       ) : filteredMenus.length === 0 ? (
-        <div className="text-center py-64 bg-red-100 rounded-3xl shadow-2xl">
-          <p className="text-6xl font-extrabold text-red-600">NO DATA FOUND</p>
-          <p className="text-4xl text-gray-700 mt-8">
-            {selectedDate} • {client}
-          </p>
-        </div>
+        <p className="text-center text-4xl py-64">NO DATA FOUND</p>
       ) : (
-        <div className="space-y-16">
-          {filteredMenus.map((menu, idx) => (
+        filteredMenus.map((menu, menuIdx) => {
+
+          // 1️⃣ PREPARE MENU DATA FOR TABLE RENDER
+          // We need to group ingredients by their original rowIndex to align them horizontally "like the sheet".
+
+          // Collect all unique row indices from all ingredients across all items
+          const rowMap = new Map();
+
+          menu.items.forEach((item, itemColIdx) => {
+            item.ingredients.forEach(ing => {
+              if (!ing.actualCell) return;
+              const r = ing.actualCell.rowIndex;
+
+              if (!rowMap.has(r)) {
+                rowMap.set(r, {});
+              }
+              // Map: RowIndex -> { [ItemIndex]: Ingredient }
+              rowMap.get(r)[itemColIdx] = ing;
+            });
+          });
+
+          // Sort rows by index to appear in order
+          const sortedRowIndices = Array.from(rowMap.keys()).sort((a, b) => a - b);
+
+          return (
             <div
-              key={idx}
-              className="bg-white rounded-3xl shadow-2xl p-10 border-8 border-blue-400"
+              key={menuIdx}
+              className="bg-white rounded-3xl shadow-xl p-6 mb-12 border-4 border-indigo-200 overflow-x-auto"
             >
-              <h1 className="text-4xl font-extrabold text-center mb-8 text-blue-800">
-                {menu.meal} • {menu.pax} Persons • {menu.date} • {menu.client}
+              <h1 className="text-3xl font-extrabold text-indigo-900 mb-6 border-b-4 border-indigo-100 pb-4 sticky left-0">
+                {menu.meal} • {menu.pax} Pax • {menu.date} • {menu.client}
               </h1>
 
-              {/* Dishes as cards with ingredients */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-                {menu.items.map((item, i) => (
-                  <div
-                    key={i}
-                    className="border-4 border-blue-200 rounded-2xl overflow-hidden bg-white shadow-md"
-                  >
-                    {/* Dish header + planned/actual/diff/unit */}
-                    <div className="bg-blue-50 px-4 py-3">
-                      <div className="text-2xl font-bold mb-2">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  {/* Header Row 1: Dish Names */}
+                  <tr className="bg-indigo-600 text-white">
+                    <th className="p-3 border bg-indigo-700 min-w-[50px]">
+                      #
+                    </th>
+                    {menu.items.map((item, idx) => (
+                      <th
+                        key={idx}
+                        colSpan={3} // Name, Planned, Actual (Unit inside)
+                        className="p-3 border border-indigo-500 text-center font-bold text-lg"
+                      >
                         {item.name}
-                      </div>
-                      <div className="text-sm md:text-base flex flex-wrap gap-4">
-                        <span>
-                          <strong>Planned:</strong> {item.planned}{" "}
-                          {item.unit}
-                        </span>
-                        <span>
-                          <strong>Actual:</strong>{" "}
-                          {item.actualCell ? (
+                      </th>
+                    ))}
+                  </tr>
+
+                  {/* Header Row 2: Columns (Name, Planned, Actual) */}
+                  <tr className="bg-indigo-50 text-indigo-900 font-semibold">
+                    <th className="p-2 border bg-indigo-100">Row</th>
+                    {menu.items.map((_, idx) => (
+                      <React.Fragment key={idx}>
+                        <th className="p-2 border min-w-[120px]">Item Name</th>
+                        <th className="p-2 border w-24">Planned</th>
+                        <th className="p-2 border w-32">Actual</th>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {/* TOTALS ROW */}
+                  <tr className="bg-yellow-50 font-bold border-b-4 border-indigo-100">
+                    <td className="p-3 border text-center bg-yellow-100 text-yellow-800">
+                      TOTALS
+                    </td>
+                    {menu.items.map((item, idx) => (
+                      <React.Fragment key={idx}>
+                        <td className="p-3 border text-center text-gray-500 italic">
+                          (Dish Total)
+                        </td>
+                        <td className="p-3 border text-center text-indigo-700 text-lg">
+                          {item.planned} {item.unit}
+                        </td>
+                        <td className="p-3 border text-center relative bg-white">
+                          <div className="flex items-center justify-center gap-1">
                             <input
                               type="number"
                               defaultValue={item.actual}
                               onBlur={(e) =>
-                                markUpdate(item.actualCell, e.target.value)
+                                handleAutoSave(item.actualCell, e.target.value)
                               }
-                              className="w-20 px-2 py-1 border-2 border-blue-400 rounded-lg text-right"
+                              className="w-20 p-1 border-2 border-yellow-300 rounded text-center bg-yellow-50 focus:bg-white focus:border-indigo-500 outline-none"
                             />
-                          ) : (
-                            item.actual
-                          )}{" "}
-                          {item.unit}
-                        </span>
-                        <span>
-                          <strong>Diff:</strong>{" "}
-                          {item.planned - item.actual}
-                        </span>
-                      </div>
-                    </div>
+                            <span className="text-xs text-gray-400">{item.unit}</span>
+                          </div>
+                        </td>
+                      </React.Fragment>
+                    ))}
+                  </tr>
 
-                    {/* Ingredient table for this dish */}
-                    {item.ingredients && item.ingredients.length > 0 && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm md:text-base">
-                          <thead className="bg-blue-800 text-white">
-                            <tr>
-                              <th className="p-3 text-left">Item Name</th>
-                              <th className="p-3 text-right">Planned</th>
-                              <th className="p-3 text-right">Actual</th>
-                              <th className="p-3 text-right">Unit</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {item.ingredients.map((ing, j) => (
-                              <tr
-                                key={j}
-                                className="border-t hover:bg-blue-50 transition"
-                              >
-                                <td className="p-3">{ing.name}</td>
-                                <td className="p-3 text-right">
-                                  {ing.planned}
-                                </td>
-                                <td className="p-3 text-right">
-                                  {ing.actualCell ? (
-                                    <input
-                                      type="number"
-                                      defaultValue={ing.actual}
-                                      onBlur={(e) =>
-                                        markUpdate(
-                                          ing.actualCell,
-                                          e.target.value
-                                        )
-                                      }
-                                      className="w-20 px-2 py-1 border-2 border-blue-400 rounded-lg text-right"
-                                    />
-                                  ) : (
-                                    ing.actual
-                                  )}
-                                </td>
-                                <td className="p-3 text-right">
-                                  {ing.unit}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  {/* INGREDIENT ROWS */}
+                  {sortedRowIndices.map((rowIndex, rIdx) => (
+                    <tr key={rowIndex} className="hover:bg-gray-50 even:bg-gray-50">
+                      <td className="p-2 border text-center text-xs text-gray-400 font-mono bg-white">
+                        {rowIndex + 1}
+                      </td>
+
+                      {menu.items.map((item, itemIdx) => {
+                        const ing = rowMap.get(rowIndex)[itemIdx];
+
+                        if (!ing) {
+                          // Empty cells for this dish in this row
+                          return (
+                            <React.Fragment key={itemIdx}>
+                              <td className="border bg-gray-50/30"></td>
+                              <td className="border bg-gray-50/30"></td>
+                              <td className="border bg-gray-50/30"></td>
+                            </React.Fragment>
+                          );
+                        }
+
+                        return (
+                          <React.Fragment key={itemIdx}>
+                            <td className="p-2 border font-medium text-gray-700">
+                              {ing.name}
+                            </td>
+                            <td className="p-2 border text-center text-gray-600">
+                              {ing.planned} {ing.unit}
+                            </td>
+                            <td className="p-2 border text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  type="number"
+                                  defaultValue={ing.actual}
+                                  onBlur={(e) =>
+                                    handleAutoSave(ing.actualCell, e.target.value)
+                                  }
+                                  className={`w-20 p-1 border rounded text-center outline-none ${ing.diff < 0 ? "border-red-300 bg-red-50 text-red-700" :
+                                    ing.diff > 0 ? "border-green-300 bg-green-50 text-green-700" :
+                                      "border-gray-300"
+                                    } focus:border-indigo-500 focus:bg-white focus:text-black transition-colors`}
+                                />
+                                {ing.unit && <span className="text-xs text-gray-400">{ing.unit}</span>}
+                              </div>
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {menu.items.length === 0 && (
+                <div className="p-8 text-center text-gray-400">
+                  No dishes found for this menu.
+                </div>
+              )}
             </div>
-          ))}
-        </div>
+          );
+        })
       )}
     </div>
   );

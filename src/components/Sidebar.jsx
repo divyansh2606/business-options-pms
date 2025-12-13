@@ -3,7 +3,8 @@ import React from 'react';
 export default function Sidebar({ user, activeTab, setActiveTab, onLogout }) {
   // Menu items array
   const menuItems = [
-    { id: "dashboard", label: "Production Summary", icon: "📊" },
+    { id: "dashboard", label: "Production Plan", icon: "📊" },
+    { id: "productionSummary", label: "Production Summary", icon: "📈" }, // New Item
     { id: "stock", label: "Stock/Inventory", icon: "📦" },
     { id: "orders", label: "Orders", icon: "🛒" },
     { id: "employees", label: "Employees", icon: "👥" },
@@ -57,15 +58,13 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }) {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full text-left px-4 py-3 rounded-xl transition-all duration-200 flex items-center group ${
-                  activeTab === item.id 
-                    ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 shadow-xl transform scale-105' 
-                    : 'hover:bg-indigo-800 hover:bg-opacity-70 hover:transform hover:scale-102'
-                }`}
+                className={`w-full text-left px-4 py-3 rounded-xl transition-all duration-200 flex items-center group ${activeTab === item.id
+                  ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 shadow-xl transform scale-105'
+                  : 'hover:bg-indigo-800 hover:bg-opacity-70 hover:transform hover:scale-102'
+                  }`}
               >
-                <span className={`mr-3 text-xl transition-transform duration-200 ${
-                  activeTab === item.id ? 'scale-110' : 'group-hover:scale-110'
-                }`}>{item.icon}</span>
+                <span className={`mr-3 text-xl transition-transform duration-200 ${activeTab === item.id ? 'scale-110' : 'group-hover:scale-110'
+                  }`}>{item.icon}</span>
                 <span className="flex-1 text-sm font-medium">{item.label}</span>
                 {activeTab === item.id && (
                   <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
@@ -81,16 +80,16 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout }) {
             onClick={onLogout}
             className="w-full px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-xl transition-all duration-200 flex items-center justify-center group shadow-lg hover:shadow-xl transform hover:scale-105"
           >
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              className="h-5 w-5 mr-2 transition-transform duration-200 group-hover:translate-x-1" 
-              viewBox="0 0 20 20" 
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 mr-2 transition-transform duration-200 group-hover:translate-x-1"
+              viewBox="0 0 20 20"
               fill="currentColor"
             >
-              <path 
-                fillRule="evenodd" 
-                d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-2.293 2.293z" 
-                clipRule="evenodd" 
+              <path
+                fillRule="evenodd"
+                d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-2.293 2.293z"
+                clipRule="evenodd"
               />
             </svg>
             <span className="font-semibold">Logout</span>

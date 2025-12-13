@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import flowerImage from "../../assets/images/option_logo2.png";
+import { validateCredentials } from "../../services/userService";
 
 export default function LoginPage() {
   const [userType, setUserType] = useState("ceo");
@@ -19,30 +20,13 @@ export default function LoginPage() {
       return;
     }
 
-    if (userType === "ceo") {
-      if (name === "ceo" && password === "password123") {
-        const user = { name: "CEO", role: "ceo", mobile };
-        navigate("/dashboard", { state: { user } });
-      } else {
-        setError("Invalid CEO credentials");
-      }
+    // Use userService for dynamic credential validation
+    const result = validateCredentials(userType, name, mobile, password);
+
+    if (result.success) {
+      navigate("/dashboard", { state: { user: result.user } });
     } else {
-      const dummyEmployees = [
-        { name: "John", mobile: "9876543210", password: "john123" },
-        { name: "Jane", mobile: "9876543211", password: "jane123" },
-        { name: "Mike", mobile: "9876543212", password: "mike123" }
-      ];
-
-      const employee = dummyEmployees.find(
-        emp => emp.name === name && emp.mobile === mobile && emp.password === password
-      );
-
-      if (employee) {
-        const user = { name: employee.name, role: "employee", mobile: employee.mobile };
-        navigate("/dashboard", { state: { user } });
-      } else {
-        setError("Invalid employee credentials");
-      }
+      setError(result.message);
     }
   };
 
