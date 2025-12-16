@@ -323,8 +323,6 @@ export default function DashboardSummary() {
       }
 
       setAllMenus(menus);
-
-      // Set all available clients
       setClientOptions(allClients);
 
       // ✅ Check localStorage for saved selections
@@ -332,29 +330,47 @@ export default function DashboardSummary() {
       const savedDate = localStorage.getItem('pms_selected_date');
       const savedMeal = localStorage.getItem('pms_selected_meal');
 
-      // ✅ On initial load, restore saved selections or use first available
+      // --- INITIAL STATE SETUP ---
+      let currentClient = client;
       if (allClients.length > 0 && !client) {
-        const defaultClient = savedClient && allClients.includes(savedClient) ? savedClient : allClients[0];
-        setClient(defaultClient);
+        currentClient = savedClient && allClients.includes(savedClient) ? savedClient : allClients[0];
+        setClient(currentClient);
 
         // Fetch dates for default client
-        const clientDates = await fetchDynamicDates(defaultClient);
+        const clientDates = await fetchDynamicDates(currentClient);
         setDateOptions(clientDates);
 
         if (clientDates.length > 0 && !selectedDate) {
-          // ✅ SMART LOGIC (Load): Keep saved date if valid
           const defaultDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
           setSelectedDate(defaultDate);
 
-          // Fetch meals for default client + date
-          const clientMeals = await fetchDynamicMeals(defaultClient, defaultDate);
+          const clientMeals = await fetchDynamicMeals(currentClient, defaultDate);
           setMealOptions(clientMeals);
 
           if (clientMeals.length > 0 && !mealType) {
-            // ✅ SMART LOGIC (Load): Keep saved meal if valid
             const defaultMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
             setMealType(defaultMeal);
           }
+        }
+      }
+
+      // 🚨 CLOSED SHEET FIX: Check for Data Mismatch
+      // If we have menus, but they belong to a different client/date/meal than what we selected,
+      // it means the sheet is stale (didn't update). We must force an update.
+      if (menus.length > 0 && currentClient) {
+        const sheetClient = menus[0].client; // Assuming single menu view
+        // Note: formatted dates might differ slightly, checking Client mainly
+        if (sheetClient && sheetClient.toLowerCase() !== currentClient.toLowerCase()) {
+          console.warn(`⚠️ Data Mismatch! Sheet has "${sheetClient}", expected "${currentClient}". Forcing update...`);
+
+          await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: currentClient });
+          if (selectedDate) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: selectedDate });
+          if (mealType) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "B2", value: mealType });
+
+          // Re-fetch after forced update
+          await new Promise(r => setTimeout(r, 2000)); // Wait for sheet calc
+          const freshRows = await fetchPMSData();
+          setAllMenus(parsePMSSheet(freshRows));
         }
       }
 
@@ -364,6 +380,27 @@ export default function DashboardSummary() {
     }
     if (!silent) setLoading(false);
   };
+
+  // ✅ FORCE RELOAD: Updates Dropdowns + Fetches Data
+  const handleForceReload = async () => {
+    setLoading(true);
+    try {
+      console.log("🔄 Force Reloading: Syncing Dropdowns...");
+      try {
+        if (client) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "A1", value: client });
+        if (selectedDate) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: selectedDate });
+        if (mealType) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: mealType });
+      } catch (updateErr) {
+        console.warn("⚠️ Dropdown update failed, but proceeding to load data:", updateErr);
+      }
+
+      await loadData(true); // Load data (silent=true because we handle loading here)
+    } catch (e) {
+      console.error("Force reload failed", e);
+    }
+    setLoading(false);
+  };
+
 
   useEffect(() => {
     // Initial load
@@ -392,7 +429,7 @@ export default function DashboardSummary() {
       try {
         await updatePMSDropdown({
           sheet: "PMS",
-          dropdownCell: "B2",
+          dropdownCell: "Y1",
           value: newVal,
         });
         await loadData();
@@ -465,7 +502,7 @@ export default function DashboardSummary() {
       try {
         await updatePMSDropdown({
           sheet: "PMS",
-          dropdownCell: "Y1",
+          dropdownCell: "A1",
           value: newVal
         });
 
@@ -609,7 +646,7 @@ export default function DashboardSummary() {
           {/* Reload / Status */}
           <div className="flex flex-col gap-2 w-full md:w-auto">
             <button
-              onClick={() => loadData(false)}
+              onClick={handleForceReload}
               className="w-full md:w-auto px-6 py-3 md:px-16 md:py-5 bg-purple-800 text-white text-base md:text-2xl font-extrabold rounded-2xl md:rounded-3xl shadow-xl hover:bg-purple-900 transition-colors"
             >
               RELOAD DATA

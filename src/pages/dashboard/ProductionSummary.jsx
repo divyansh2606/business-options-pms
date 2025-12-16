@@ -4,6 +4,9 @@ import {
     fetchPMSData, // Apps Script - triggers live sheet recalculation
     updatePMSDropdown,
     updateCell,
+    fetchDynamicClients,
+    fetchDynamicDates,
+    fetchDynamicMeals,
 } from "../../api/restaurantAPI2";
 
 // Helper components & functions
@@ -222,38 +225,71 @@ export default function ProductionSummary() {
     const [dateOptions, setDateOptions] = useState([]);
     const [mealOptions, setMealOptions] = useState([]);
 
-    // Load Data
+    // Load Data (Logic mirrored from DashboardSummary)
     const loadData = async (silent = false) => {
         if (!silent) setLoading(true);
         try {
-            const [pmsRows, menuOpts] = await Promise.all([
+            // Fetch PMS data and ALL clients dynamically
+            const [pmsRows, allClients] = await Promise.all([
                 fetchPMSData(),
-                fetchMenuOptions(),
+                fetchDynamicClients(),
             ]);
 
-            // Use the NEW parser for Columns AK+
+            // Parse the sheet content (for the table)
             const menus = parseProductionSheet(pmsRows);
             setAllMenus(menus);
 
-            // Derive options (standard logic)
-            const meals = menuOpts.meals.length ? menuOpts.meals : [...new Set(menus.map(m => m.meal))].filter(Boolean);
-            const clients = menuOpts.clients.length ? menuOpts.clients : [...new Set(menus.map(m => m.client))].filter(Boolean);
-            const dates = menuOpts.dates.length ? menuOpts.dates.map(formatDate) : [...new Set(menus.map(m => m.date))].filter(Boolean).map(formatDate);
+            // Set Client Options from dynamic list
+            setClientOptions(allClients);
 
-            setMealOptions(meals);
-            setClientOptions(clients);
-            setDateOptions(dates);
+            // ✅ Check localStorage for saved selections
+            const savedClient = localStorage.getItem('pms_selected_client');
+            const savedDate = localStorage.getItem('pms_selected_date');
+            const savedMeal = localStorage.getItem('pms_selected_meal');
 
-            // Sync defaults
-            if (menus.length > 0) {
-                // Try to keep current selection if valid, else pick first
-                if (!mealType) setMealType(menus[0].meal);
-                if (!selectedDate) setSelectedDate(menus[0].date);
-                if (!client) setClient(menus[0].client);
-            } else {
-                if (!mealType && meals.length) setMealType(meals[0]);
-                if (!client && clients.length) setClient(clients[0]);
-                if (!selectedDate && dates.length) setSelectedDate(dates[0]);
+            // --- INITIAL STATE SETUP ---
+            let currentClient = client;
+
+            // If we have clients and no current selection, pick one
+            if (allClients.length > 0 && !client) {
+                currentClient = savedClient && allClients.includes(savedClient) ? savedClient : allClients[0];
+                setClient(currentClient);
+
+                // Fetch dates for this client
+                const clientDates = await fetchDynamicDates(currentClient);
+                setDateOptions(clientDates);
+
+                if (clientDates.length > 0 && !selectedDate) {
+                    const defaultDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
+                    setSelectedDate(defaultDate);
+
+                    // Fetch meals for this client + date
+                    const clientMeals = await fetchDynamicMeals(currentClient, defaultDate);
+                    setMealOptions(clientMeals);
+
+                    if (clientMeals.length > 0 && !mealType) {
+                        const defaultMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
+                        setMealType(defaultMeal);
+                    }
+                }
+            }
+
+            // 🚨 CLOSED SHEET FIX: Check for Data Mismatch
+            // If the sheet returns data for "Client A", but our state says "Client B", forces update.
+            if (menus.length > 0 && currentClient) {
+                const sheetClient = menus[0].client;
+                if (sheetClient && sheetClient.toLowerCase() !== currentClient.toLowerCase()) {
+                    console.warn(`⚠️ Data Mismatch! Sheet has "${sheetClient}", expected "${currentClient}". Forcing update...`);
+
+                    await updatePMSDropdown({ sheet: "PMS", dropdownCell: "A1", value: currentClient });
+                    if (selectedDate) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: selectedDate });
+                    if (mealType) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: mealType });
+
+                    // Re-fetch after forced update
+                    await delay(3000);
+                    const freshRows = await fetchPMSData();
+                    setAllMenus(parseProductionSheet(freshRows));
+                }
             }
 
         } catch (err) {
@@ -265,7 +301,10 @@ export default function ProductionSummary() {
     useEffect(() => {
         loadData();
         // Polling
-        const timer = setInterval(() => loadData(true), 60000);
+        const timer = setInterval(() => {
+            console.log("⏰ Auto-refreshing Production Data...");
+            loadData(true);
+        }, 60000);
         return () => clearInterval(timer);
     }, []);
 
@@ -281,34 +320,143 @@ export default function ProductionSummary() {
     // Helper: delay to allow sheet recalculation
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // ---------------------------------------------------------
+    //  HANDLERS (Replicated from DashboardSummary logic)
+    // ---------------------------------------------------------
+
+    // 1️⃣ HANDLE MEAL CHANGE (Updates Sheet Y1 & Reloads)
     const handleMealChange = async (e) => {
         const newVal = e.target.value;
         setMealType(newVal);
+        localStorage.setItem('pms_selected_meal', newVal);
+
         if (newVal) {
             setLoading(true);
-            await updatePMSDropdown({ sheet: "PMS", dropdownCell: "B2", value: newVal });
-            await delay(2000); // Wait for sheet to recalculate
-            await loadData();
+            try {
+                // Corrected: Meal dropdown is Y1
+                await updatePMSDropdown({
+                    sheet: "PMS",
+                    dropdownCell: "Y1",
+                    value: newVal,
+                });
+                await delay(2500); // ⚡ Wait for Apps Script "Wake Up" + Recalc
+                await loadData();
+            } catch (err) {
+                console.error("❌ Meal change failed:", err);
+                setLoading(false);
+            }
         }
     };
+
+    // 2️⃣ HANDLE DATE CHANGE (Updates Sheet M1 & Reloads)
     const handleDateChange = async (e) => {
         const newVal = e.target.value;
         setSelectedDate(newVal);
+        localStorage.setItem('pms_selected_date', newVal);
+
+        // Reset dependent
+        setMealType("");
+
         if (newVal) {
             setLoading(true);
-            await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: newVal });
-            await delay(2000); // Wait for sheet to recalculate
-            await loadData();
+            try {
+                // Corrected: Date dropdown is M1
+                await updatePMSDropdown({
+                    sheet: "PMS",
+                    dropdownCell: "M1",
+                    value: newVal
+                });
+
+                // Fetch valid meals for this client/date (Cascading Filter)
+                const clientMeals = await fetchDynamicMeals(client, newVal);
+                setMealOptions(clientMeals);
+
+                if (clientMeals.length > 0) {
+                    // Smart default
+                    let nextMeal = mealType;
+                    if (!clientMeals.includes(nextMeal)) {
+                        const savedMeal = localStorage.getItem('pms_selected_meal');
+                        nextMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
+                    }
+                    setMealType(nextMeal);
+
+                    // Sync sheet with new meal default
+                    await updatePMSDropdown({
+                        sheet: "PMS",
+                        dropdownCell: "Y1", // Meal is Y1
+                        value: nextMeal
+                    });
+                }
+
+                await delay(2500); // ⚡ Wait for Sheet
+                await loadData();
+
+            } catch (err) {
+                console.error("❌ Date change failed:", err);
+                setLoading(false);
+            }
         }
     };
+
+    // 3️⃣ HANDLE CLIENT CHANGE (Updates Sheet A1 & Reloads)
     const handleClientChange = async (e) => {
         const newVal = e.target.value;
         setClient(newVal);
+        localStorage.setItem('pms_selected_client', newVal);
+
+        // Reset dependents
+        setSelectedDate("");
+        setMealType("");
+
         if (newVal) {
             setLoading(true);
-            await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: newVal });
-            await delay(2000); // Wait for sheet to recalculate
-            await loadData();
+            try {
+                // Corrected: Client dropdown is A1
+                await updatePMSDropdown({
+                    sheet: "PMS",
+                    dropdownCell: "A1",
+                    value: newVal
+                });
+
+                // Fetch dynamic dates for client
+                const clientDates = await fetchDynamicDates(newVal);
+                setDateOptions(clientDates);
+
+                if (clientDates.length > 0) {
+                    let nextDate = selectedDate;
+                    // Smart default
+                    if (!clientDates.includes(nextDate)) {
+                        const savedDate = localStorage.getItem('pms_selected_date');
+                        nextDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
+                    }
+                    setSelectedDate(nextDate);
+
+                    // Update sheet date M1
+                    await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: nextDate });
+
+                    // Now fetch meals
+                    const clientMeals = await fetchDynamicMeals(newVal, nextDate);
+                    setMealOptions(clientMeals);
+
+                    if (clientMeals.length > 0) {
+                        let nextMeal = mealType;
+                        if (!clientMeals.includes(nextMeal)) {
+                            const savedMeal = localStorage.getItem('pms_selected_meal');
+                            nextMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
+                        }
+                        setMealType(nextMeal);
+                        // Update sheet meal Y1
+                        await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: nextMeal });
+                    }
+                }
+
+                await delay(2500); // ⚡ Wait for Sheet
+                await loadData();
+
+            } catch (err) {
+                console.error("❌ Client change failed:", err);
+                setLoading(false);
+            }
         }
     };
 

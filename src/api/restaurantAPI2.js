@@ -1,10 +1,10 @@
 // src/api/restaurantAPI2.js - Apps Script Method (with MENU options)
 
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyqECFzTOWfhsOwunuleAeuP-wa2LS6KDtHk0Q0pjzlagmxMZA-4A_YR2hB0KKfFDjR/exec";
+  "https://script.google.com/macros/s/AKfycbwjGs5jBufTTxVftIRe6Qpx3m-5Ig4D8X06c5r73IKpqOHLI050T6HTV0vwBe_ix22G/exec";
 async function fetchSheetData(sheetName) {
   try {
-    const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}`;
+    const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`;
 
     console.log(`📡 Fetching "${sheetName}" from Apps Script...`);
 
@@ -139,7 +139,8 @@ export const updatePMSDropdown = async ({ sheet, dropdownCell, value }) => {
       sheet: sheet,
       row: indices.rowIndex.toString(), // 0-indexed, Apps Script adds +1
       col: indices.colIndex.toString(), // 0-indexed, Apps Script adds +1
-      value: value
+      value: value,
+      _t: Date.now() // Cache busting
     });
 
     const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
@@ -176,8 +177,8 @@ export const updateCell = async (sheet, rowIndex, colIndex, value) => {
     const params = new URLSearchParams({
       action: 'update',
       sheet: sheet,
-      row: rowIndex.toString(), // ✅ Fix: Removing +1
-      col: (colIndex + 1).toString(), // Keep +1 for Column
+      row: rowIndex.toString(),
+      col: colIndex.toString(), // Standard 0-indexed, Apps Script will add +1
       value: value
     });
 
