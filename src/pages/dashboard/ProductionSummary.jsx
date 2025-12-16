@@ -431,7 +431,8 @@ export default function ProductionSummary() {
                                                 <td className="p-3 text-center">
                                                     <input
                                                         type="number"
-                                                        defaultValue={ing.actual}
+                                                        defaultValue={ing.actual === 0 ? "" : ing.actual}
+                                                        placeholder="0"
                                                         onBlur={async (e) => {
                                                             setAutoSaving(true);
                                                             setLastSaveStatus("Saving...");

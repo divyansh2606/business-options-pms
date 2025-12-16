@@ -1,7 +1,7 @@
 // src/api/stockAPI.js
 // Stock API - IMS-O2D Google Sheet integration (hardened/timeout/retries)
 const STOCK_APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyaqaZsGWglJ2mtjH-L_ApEb1VjfqYNokv_f2Wg_AntYqG28okVFP3HQ276Fe6ygC8E/exec";
+  "https://script.google.com/macros/s/AKfycbxDTPKbWz5FgBi9zJzFsECmt1jl-NOywdPV6wk1PXbN0jEW9y9HZE5FTgcW9LiJsOnL/exec";
 /**
  * Fetch wrapper with timeout + simple retry on network errors.
  * @param {string} url
@@ -147,6 +147,44 @@ export const fetchStockOrders = async () => {
   } catch (err) {
     console.error("❌ Error fetching orders:", err);
     return [];
+  }
+};
+
+// Fetch orders from Diff-O2d sheet (for Pending Stock Page)
+export const fetchDiffO2dOrders = async () => {
+  const url = `${STOCK_APPS_SCRIPT_URL}?action=getDiffO2dOrders`;
+  console.log("📡 fetchDiffO2dOrders ->", url);
+  try {
+    // Increased timeout to 30s and retries to 3 for large datasets
+    const res = await fetchWithTimeout(url, {}, 30000, 3);
+    if (!res.ok) {
+      console.error(`❌ fetchDiffO2dOrders HTTP ${res.status}`);
+      return { headerRow1: [], headerRow2: [], data: [] };
+    }
+    const data = await parseResponse(res);
+    console.log("✅ Diff-O2d Orders fetched:", data);
+    
+    // Return the full response object with headers and data
+    if (data && (data.headerRow1 || data.headerRow2)) {
+      console.log("✅ Response has headerRow1/headerRow2:", {
+        h1: data.headerRow1,
+        h2: data.headerRow2,
+        dataLen: data.data ? data.data.length : 0
+      });
+      return data;
+    }
+    
+    // Fallback: if it's just an array, return it
+    if (Array.isArray(data)) {
+      console.log("⚠️ Got array response, returning as data:", data.length, "items");
+      return { headerRow1: [], headerRow2: [], data: data };
+    }
+    
+    console.warn("⚠️ Unexpected response format:", data);
+    return { headerRow1: [], headerRow2: [], data: [] };
+  } catch (err) {
+    console.error("❌ Error fetching Diff-O2d orders:", err);
+    return { headerRow1: [], headerRow2: [], data: [] };
   }
 };
 

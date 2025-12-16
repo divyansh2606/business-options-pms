@@ -1,7 +1,7 @@
 // src/api/restaurantAPI2.js - Apps Script Method (with MENU options)
 
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbwD578gGk2BsAh75zIQOr2sw9YZ3WiIMF80Gg6Xy_bj4vUXosJoXkRhWB-G2XUAefju/exec";
+  "https://script.google.com/macros/s/AKfycbyqECFzTOWfhsOwunuleAeuP-wa2LS6KDtHk0Q0pjzlagmxMZA-4A_YR2hB0KKfFDjR/exec";
 async function fetchSheetData(sheetName) {
   try {
     const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}`;
@@ -191,3 +191,66 @@ export const updateCell = async (sheet, rowIndex, colIndex, value) => {
     throw err;
   }
 };
+
+// ============ NEW: DYNAMIC FILTERING APIs ============
+
+// Get all clients dynamically from PMS sheet
+export const fetchDynamicClients = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=getClients`;
+    console.log("🔄 Fetching dynamic clients...");
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("✅ Dynamic clients:", data.clients);
+    return data.clients || [];
+  } catch (err) {
+    console.error("❌ Error fetching dynamic clients:", err);
+    return [];
+  }
+};
+
+// Get dates for a specific client
+export const fetchDynamicDates = async (client) => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=getDates&client=${encodeURIComponent(client)}`;
+    console.log(`🔄 Fetching dates for client: ${client}`);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`✅ Dates for ${client}:`, data.dates);
+    return data.dates || [];
+  } catch (err) {
+    console.error("❌ Error fetching dynamic dates:", err);
+    return [];
+  }
+};
+
+// Get meals for a specific client and date
+export const fetchDynamicMeals = async (client, date) => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=getMeals&client=${encodeURIComponent(client)}&date=${encodeURIComponent(date)}`;
+    console.log(`🔄 Fetching meals for ${client} on ${date}`);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`✅ Meals for ${client} on ${date}:`, data.meals);
+    return data.meals || [];
+  } catch (err) {
+    console.error("❌ Error fetching dynamic meals:", err);
+    return [];
+  }
+};
+

@@ -1,11 +1,13 @@
 // DashboardSummary.jsx - Systematic PMS View (Meals → Dishes → Ingredients) + Save + Sheet Dropdown Control
 
 import React, { useState, useEffect } from "react";
-import { fetchMenuOptions } from "../../api/restaurantAPI3"; // CSV API for menu options (static list)
 import {
   fetchPMSData, // Apps Script - triggers live sheet recalculation
   updatePMSDropdown,
   updateCell,
+  fetchDynamicClients, // ✅ NEW: Dynamic filtering
+  fetchDynamicDates,
+  fetchDynamicMeals,
 } from "../../api/restaurantAPI2";
 
 // ----------------------- helpers -----------------------
@@ -304,43 +306,56 @@ export default function DashboardSummary() {
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [pmsRows, menuOpts] = await Promise.all([
+      // Fetch PMS data and ALL clients
+      const [pmsRows, allClients] = await Promise.all([
         fetchPMSData(),
-        fetchMenuOptions(),
+        fetchDynamicClients(),
       ]);
 
-      const menus = parsePMSSheet(pmsRows);
+      let menus = parsePMSSheet(pmsRows);
+
+      // 🔄 RETRY LOGIC: If no menus found, wait 1s and try again (Sheet might be updating)
+      if (menus.length === 0) {
+        console.log("⚠️ No data found immediately. Retrying in 1s...");
+        await new Promise(r => setTimeout(r, 1000));
+        const pmsRowsRetry = await fetchPMSData();
+        menus = parsePMSSheet(pmsRowsRetry);
+      }
 
       setAllMenus(menus);
 
-      // ✅ Get dynamic values from MENU sheet or fallback to parsed data
-      const meals = menuOpts.meals.length
-        ? menuOpts.meals
-        : [...new Set(menus.map((m) => m.meal))].filter(Boolean);
+      // Set all available clients
+      setClientOptions(allClients);
 
-      const clients = menuOpts.clients.length
-        ? menuOpts.clients
-        : [...new Set(menus.map((m) => m.client))].filter(Boolean);
+      // ✅ Check localStorage for saved selections
+      const savedClient = localStorage.getItem('pms_selected_client');
+      const savedDate = localStorage.getItem('pms_selected_date');
+      const savedMeal = localStorage.getItem('pms_selected_meal');
 
-      const dates = menuOpts.dates.length
-        ? menuOpts.dates.map(formatDate)
-        : [...new Set(menus.map((m) => m.date))].filter(Boolean).map(formatDate);
+      // ✅ On initial load, restore saved selections or use first available
+      if (allClients.length > 0 && !client) {
+        const defaultClient = savedClient && allClients.includes(savedClient) ? savedClient : allClients[0];
+        setClient(defaultClient);
 
-      setMealOptions(meals);
-      setClientOptions(clients);
-      setDateOptions(dates);
+        // Fetch dates for default client
+        const clientDates = await fetchDynamicDates(defaultClient);
+        setDateOptions(clientDates);
 
-      // ✅ SMART DEFAULT: Sync dropdowns to what is ALREADY in the sheet/parsed data
-      if (menus.length > 0) {
-        const current = menus[0];
-        if (!mealType) setMealType(current.meal);
-        if (!selectedDate) setSelectedDate(current.date);
-        if (!client) setClient(current.client);
-      } else {
-        // Fallback: Default to first option if no data parsed
-        if (!mealType && meals.length) setMealType(meals[0]);
-        if (!client && clients.length) setClient(clients[0]);
-        if (!selectedDate && dates.length) setSelectedDate(dates[0]);
+        if (clientDates.length > 0 && !selectedDate) {
+          // ✅ SMART LOGIC (Load): Keep saved date if valid
+          const defaultDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
+          setSelectedDate(defaultDate);
+
+          // Fetch meals for default client + date
+          const clientMeals = await fetchDynamicMeals(defaultClient, defaultDate);
+          setMealOptions(clientMeals);
+
+          if (clientMeals.length > 0 && !mealType) {
+            // ✅ SMART LOGIC (Load): Keep saved meal if valid
+            const defaultMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
+            setMealType(defaultMeal);
+          }
+        }
       }
 
       console.log("📅 Parsed menus count:", menus.length);
@@ -366,20 +381,21 @@ export default function DashboardSummary() {
 
   console.log(`💡 Filtered menus: ${filteredMenus.length} / ${allMenus.length}`);
 
-  // 1️⃣ HANDLE MEAL CHANGE (Updates Sheet & Reloads)
+  // 1️⃣ HANDLE MEAL CHANGE (Updates Sheet B2 & Reloads)
   const handleMealChange = async (e) => {
     const newVal = e.target.value;
     setMealType(newVal);
+    localStorage.setItem('pms_selected_meal', newVal);
 
     if (newVal) {
-      setLoading(true); // Show local loading
+      setLoading(true);
       try {
         await updatePMSDropdown({
           sheet: "PMS",
           dropdownCell: "B2",
           value: newVal,
         });
-        await loadData(); // 🚀 Force Reload Data
+        await loadData();
       } catch (err) {
         console.error("❌ Meal change failed:", err);
         setLoading(false);
@@ -391,18 +407,46 @@ export default function DashboardSummary() {
   const handleDateChange = async (e) => {
     const newVal = e.target.value;
     setSelectedDate(newVal);
+    localStorage.setItem('pms_selected_date', newVal);
 
     if (newVal) {
       setLoading(true);
       try {
-        // Providing the string date.
-        // Apps Script might expect a specific format, but usually string works if cell is flexible.
         await updatePMSDropdown({
           sheet: "PMS",
-          dropdownCell: "M1", // Based on analysis of your sheet script
+          dropdownCell: "M1",
           value: newVal
         });
-        await loadData();
+
+        const pmsRows = await fetchPMSData();
+        const menus = parsePMSSheet(pmsRows);
+        setAllMenus(menus);
+
+        const clientMeals = await fetchDynamicMeals(client, newVal);
+        setMealOptions(clientMeals);
+
+        if (clientMeals.length > 0) {
+          // ✅ SMART LOGIC: Keep current meal if valid, else check storage, else use first
+          let nextMeal = mealType;
+          if (!clientMeals.includes(nextMeal)) {
+            const savedMeal = localStorage.getItem('pms_selected_meal');
+            nextMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
+          }
+
+          setMealType(nextMeal);
+          localStorage.setItem('pms_selected_meal', nextMeal); // Update storage with valid meal
+
+          // Only update sheet if it changed
+          if (nextMeal !== mealType) {
+            await updatePMSDropdown({
+              sheet: "PMS",
+              dropdownCell: "B2",
+              value: nextMeal
+            });
+          }
+        }
+
+        setLoading(false);
       } catch (err) {
         console.error("❌ Date change failed:", err);
         setLoading(false);
@@ -414,17 +458,67 @@ export default function DashboardSummary() {
   const handleClientChange = async (e) => {
     const newVal = e.target.value;
     setClient(newVal);
+    localStorage.setItem('pms_selected_client', newVal);
 
     if (newVal) {
       setLoading(true);
       try {
-        // Assuming Y1 is Client based on `var client = sourceSheet.getRange("Y1").getValue()` in script
         await updatePMSDropdown({
           sheet: "PMS",
           dropdownCell: "Y1",
           value: newVal
         });
-        await loadData();
+
+        const pmsRows = await fetchPMSData();
+        const menus = parsePMSSheet(pmsRows);
+        setAllMenus(menus);
+
+        const clientDates = await fetchDynamicDates(newVal);
+        setDateOptions(clientDates);
+
+        if (clientDates.length > 0) {
+          // ✅ SMART LOGIC: Keep current date if valid, else check storage, else use first
+          let nextDate = selectedDate;
+          if (!clientDates.includes(nextDate)) {
+            const savedDate = localStorage.getItem('pms_selected_date');
+            nextDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
+          }
+
+          setSelectedDate(nextDate);
+          localStorage.setItem('pms_selected_date', nextDate);
+
+          // Update date in sheet
+          await updatePMSDropdown({
+            sheet: "PMS",
+            dropdownCell: "M1",
+            value: nextDate
+          });
+
+          // Fetch meals for this client + date
+          const clientMeals = await fetchDynamicMeals(newVal, nextDate);
+          setMealOptions(clientMeals);
+
+          if (clientMeals.length > 0) {
+            // ✅ SMART LOGIC: Keep current meal if valid, else check storage, else use first
+            let nextMeal = mealType;
+            if (!clientMeals.includes(nextMeal)) {
+              const savedMeal = localStorage.getItem('pms_selected_meal');
+              nextMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
+            }
+
+            setMealType(nextMeal);
+            localStorage.setItem('pms_selected_meal', nextMeal);
+
+            // Update meal in sheet
+            await updatePMSDropdown({
+              sheet: "PMS",
+              dropdownCell: "B2",
+              value: nextMeal
+            });
+          }
+        }
+
+        setLoading(false);
       } catch (err) {
         console.error("❌ Client change failed:", err);
         setLoading(false);
@@ -453,56 +547,61 @@ export default function DashboardSummary() {
   };
 
   return (
-    <div className="p-8 min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100">
+    // ✅ MOBILE: p-0 (Full Width), DESKTOP: p-8
+    <div className="p-0 md:p-8 min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100">
 
       {/* Filters */}
-      <div className="bg-white rounded-3xl shadow-2xl p-4 md:p-10 mb-8 border-4 border-indigo-200">
-        <div className="flex flex-wrap items-end justify-center gap-4 md:gap-10">
+      {/* ✅ MOBILE: m-4 (Card Look), DESKTOP: m-0 (Normal) */}
+      <div className="m-4 md:m-0 bg-gradient-to-r from-white to-indigo-50 rounded-3xl shadow-2xl p-6 md:p-10 mb-8 border-4 border-indigo-300">
+        <h2 className="text-2xl md:text-3xl font-extrabold text-indigo-900 mb-6 text-center">
+          📊 Select Filters
+        </h2>
+        <div className="flex flex-wrap items-end justify-center gap-6 md:gap-8">
 
-          {/* Date */}
-          <div className="text-center w-full md:w-auto">
-            <label className="block text-base md:text-2xl font-bold text-indigo-800 mb-2 md:mb-3">
-              Date
-            </label>
-            <select
-              value={selectedDate}
-              onChange={handleDateChange}
-              className="w-full md:w-auto px-4 py-3 md:px-12 md:py-5 text-base md:text-2xl border-2 md:border-4 border-indigo-600 rounded-xl md:rounded-2xl"
-            >
-              {dateOptions.map((d) => (
-                <option key={d}>{d}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Client */}
-          <div className="text-center w-full md:w-auto">
-            <label className="block text-base md:text-2xl font-bold text-indigo-800 mb-2 md:mb-3">
-              Client
+          {/* Client (First) */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm md:text-lg font-bold text-indigo-700 mb-2 uppercase tracking-wide">
+              👤 Client
             </label>
             <select
               value={client}
               onChange={handleClientChange}
-              className="w-full md:w-auto px-4 py-3 md:px-12 md:py-5 text-base md:text-2xl border-2 md:border-4 border-indigo-600 rounded-xl md:rounded-2xl"
+              className="w-full px-5 py-3 md:px-6 md:py-4 text-base md:text-xl font-semibold bg-white border-3 border-indigo-500 rounded-xl shadow-lg hover:shadow-2xl hover:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-300 transition-all duration-200 cursor-pointer"
             >
               {clientOptions.map((c) => (
-                <option key={c}>{c}</option>
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
 
-          {/* Meal Type */}
-          <div className="text-center w-full md:w-auto">
-            <label className="block text-base md:text-2xl font-bold text-indigo-800 mb-2 md:mb-3">
-              Meal Type
+          {/* Date (Second - varies by client) */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm md:text-lg font-bold text-indigo-700 mb-2 uppercase tracking-wide">
+              📅 Date
+            </label>
+            <select
+              value={selectedDate}
+              onChange={handleDateChange}
+              className="w-full px-5 py-3 md:px-6 md:py-4 text-base md:text-xl font-semibold bg-white border-3 border-indigo-500 rounded-xl shadow-lg hover:shadow-2xl hover:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-300 transition-all duration-200 cursor-pointer"
+            >
+              {dateOptions.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Meal Type (Third - varies by client) */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm md:text-lg font-bold text-orange-700 mb-2 uppercase tracking-wide">
+              🍽️ Meal Type
             </label>
             <select
               value={mealType}
               onChange={handleMealChange}
-              className="w-full md:w-auto px-4 py-3 md:px-12 md:py-5 text-base md:text-2xl border-2 md:border-4 border-orange-600 rounded-xl md:rounded-2xl"
+              className="w-full px-5 py-3 md:px-6 md:py-4 text-base md:text-xl font-semibold bg-white border-3 border-orange-500 rounded-xl shadow-lg hover:shadow-2xl hover:border-orange-600 focus:outline-none focus:ring-4 focus:ring-orange-300 transition-all duration-200 cursor-pointer"
             >
               {mealOptions.map((m) => (
-                <option key={m}>{m}</option>
+                <option key={m} value={m}>{m}</option>
               ))}
             </select>
           </div>
@@ -557,9 +656,11 @@ export default function DashboardSummary() {
           return (
             <div
               key={menuIdx}
-              className="bg-white rounded-3xl shadow-xl p-6 mb-12 border-4 border-indigo-200 overflow-x-auto"
+              // ✅ MOBILE OPTIMIZED: Full width, no padding, no rounded corners on mobile
+              // ✅ DESKTOP KEPT SAME: rounded-3xl, shadow-xl, p-6
+              className="bg-white md:rounded-3xl md:shadow-xl md:p-6 mb-12 border-b-4 md:border-4 border-indigo-200 overflow-x-auto w-full"
             >
-              <h1 className="text-3xl font-extrabold text-indigo-900 mb-6 border-b-4 border-indigo-100 pb-4 sticky left-0">
+              <h1 className="text-xl md:text-3xl font-extrabold text-indigo-900 mb-4 md:mb-6 border-b-4 border-indigo-100 pb-4 sticky left-0 px-4 md:px-0">
                 {menu.meal} • {menu.pax} Pax • {menu.date} • {menu.client}
               </h1>
 
@@ -612,7 +713,8 @@ export default function DashboardSummary() {
                           <div className="flex items-center justify-center gap-1">
                             <input
                               type="number"
-                              defaultValue={item.actual}
+                              defaultValue={item.actual === 0 ? "" : item.actual}
+                              placeholder="0"
                               onBlur={(e) =>
                                 handleAutoSave(item.actualCell, e.target.value)
                               }
@@ -658,7 +760,8 @@ export default function DashboardSummary() {
                               <div className="flex items-center justify-center gap-1">
                                 <input
                                   type="number"
-                                  defaultValue={ing.actual}
+                                  defaultValue={ing.actual === 0 ? "" : ing.actual}
+                                  placeholder="0"
                                   onBlur={(e) =>
                                     handleAutoSave(ing.actualCell, e.target.value)
                                   }

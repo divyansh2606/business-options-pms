@@ -12,7 +12,13 @@ const normalizeOrders = (rows) =>
     unit: r[5],
     priority: r[6],
     remark: r[7] || '',
-    row: r[8] || null // sheet row number
+    row: r[8] || null, // sheet row number
+
+    // Received Stock Columns (P-S from Google Sheets)
+    receivedQty: r[9] || '', // Column P (index 15 in sheet, index 9 in API response)
+    weight: r[10] || '',     // Column Q (index 16 in sheet, index 10 in API response)
+    receivedUnit: r[11] || '', // Column R (index 17 in sheet, index 11 in API response)
+    receivedRemark: r[12] || '' // Column S (index 18 in sheet, index 12 in API response)
   }));
 
 export default function ReceivedStockPage() {
@@ -41,7 +47,21 @@ export default function ReceivedStockPage() {
               && String(o.itemName || '').toLowerCase().includes('item');
             return !(isHeaderRow6 || looksLikeHeader);
           });
+
           setOrders(normalized);
+
+          // Pre-populate received data state from fetched orders
+          const initialData = {};
+          normalized.forEach(o => {
+            // Initialize with existing data from Google Sheets
+            initialData[o.row] = {
+              receivedQty: o.receivedQty || '',
+              weight: o.weight || '',
+              remark: o.receivedRemark || ''
+            };
+          });
+          setReceivedData(initialData);
+
         } else {
           setOrders([]);
         }

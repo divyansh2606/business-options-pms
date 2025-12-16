@@ -2,7 +2,7 @@
 // User Authentication API - Google Sheets backend integration
 
 const USER_APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyaqaZsGWglJ2mtjH-L_ApEb1VjfqYNokv_f2Wg_AntYqG28okVFP3HQ276Fe6ygC8E/exec";
+  "https://script.google.com/macros/s/AKfycbxDTPKbWz5FgBi9zJzFsECmt1jl-NOywdPV6wk1PXbN0jEW9y9HZE5FTgcW9LiJsOnL/exec";
 
 /**
  * Fetch wrapper with timeout and retry

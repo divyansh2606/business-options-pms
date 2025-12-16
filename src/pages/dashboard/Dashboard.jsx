@@ -82,9 +82,7 @@ export default function Dashboard() {
     setActiveTab(tabId);
   };
 
-  const handleRefreshData = () => {
-    window.location.reload();
-  };
+
 
   if (!user) {
     navigate("/login");
@@ -142,25 +140,7 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center space-x-2 md:space-x-4">
-            <button
-              onClick={handleRefreshData}
-              className="px-3 md:px-5 py-2 md:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center shadow-md hover:shadow-lg transform hover:scale-105 text-sm md:text-base"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 md:h-5 md:w-5 mr-1 md:mr-2"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              <span className="hidden md:inline">Refresh Data</span>
-              <span className="md:hidden">Refresh</span>
-            </button>
+
             <div className="h-8 w-8 md:h-10 md:w-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-base md:text-lg border-2 border-indigo-200">
               {user.name.charAt(0)}
             </div>
