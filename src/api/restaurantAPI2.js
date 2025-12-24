@@ -1,17 +1,52 @@
 // src/api/restaurantAPI2.js - Apps Script Method (with MENU options)
 
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbwjGs5jBufTTxVftIRe6Qpx3m-5Ig4D8X06c5r73IKpqOHLI050T6HTV0vwBe_ix22G/exec";
+  "https://script.google.com/macros/s/AKfycbwYKRNanvcuOShPYZvUgCUSU6xmOzMab-9TRzMKKksm0RG_NLp4dGDXkEPIEhnfkGy1/exec";
+// ------- Lightweight localStorage cache helpers -------
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function getLocalCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object") return null;
+    const ts = obj.ts || 0;
+    const ttl = obj.ttl || CACHE_TTL_MS;
+    if (Date.now() - ts > ttl) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return obj.value;
+  } catch (e) {
+    console.warn("Local cache read error:", e);
+    return null;
+  }
+}
+
+function setLocalCache(key, value, ttlMs = CACHE_TTL_MS) {
+  try {
+    const obj = { value, ts: Date.now(), ttl: ttlMs };
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch (e) {
+    console.warn("Local cache write error:", e);
+  }
+}
 async function fetchSheetData(sheetName) {
   try {
     const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`;
 
     console.log(`📡 Fetching "${sheetName}" from Apps Script...`);
+    console.log(`🌐 URL: ${url}`);
 
     const response = await fetch(url);
 
+    console.log(`📊 Response status: ${response.status} ${response.statusText}`);
+
     if (!response.ok) {
-      console.error(`❌ HTTP Error ${response.status}`);
+      console.error(`❌ HTTP Error ${response.status}: ${response.statusText}`);
+      const text = await response.text();
+      console.error(`❌ Response body:`, text);
       return [];
     }
 
@@ -19,13 +54,18 @@ async function fetchSheetData(sheetName) {
 
     if (data.error) {
       console.error(`❌ Apps Script Error: ${data.error}`);
+      if (data.stack) {
+        console.error(`❌ Stack trace:`, data.stack);
+      }
       return [];
     }
 
     console.log(`✅ Received ${data.length} rows from "${sheetName}"`);
-    return data;
+    return data; // data IS the rows array
+
   } catch (error) {
     console.error(`❌ Error fetching "${sheetName}":`, error);
+    console.error(`❌ Error details:`, error.message, error.stack);
     return [];
   }
 }
@@ -160,6 +200,17 @@ export const updatePMSDropdown = async ({ sheet, dropdownCell, value }) => {
       throw new Error(data.error);
     }
 
+    // Verify the actual value that was set
+    if (data.updated && data.updated.actualValue) {
+      const actualValue = data.updated.actualValue;
+      const expectedValue = value?.toString().trim() || "";
+      if (actualValue.toLowerCase() !== expectedValue.toLowerCase() && actualValue !== expectedValue) {
+        console.warn(`⚠️ Value mismatch! Requested "${expectedValue}" but got "${actualValue}"`);
+      } else {
+        console.log(`✅ Value verified: "${actualValue}" matches requested "${expectedValue}"`);
+      }
+    }
+
     return data;
   } catch (err) {
     console.error("❌ Error in updatePMSDropdown:", err);
@@ -179,7 +230,8 @@ export const updateCell = async (sheet, rowIndex, colIndex, value) => {
       sheet: sheet,
       row: rowIndex.toString(),
       col: colIndex.toString(), // Standard 0-indexed, Apps Script will add +1
-      value: value
+      value: value,
+      guard: 'actualOnly'
     });
 
     const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
@@ -198,6 +250,27 @@ export const updateCell = async (sheet, rowIndex, colIndex, value) => {
 // Get all clients dynamically from PMS sheet
 export const fetchDynamicClients = async () => {
   try {
+    // Try local cache first for instant UX
+    const cached = getLocalCache("clients_v1");
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      // Kick off background refresh without blocking UI
+      (async () => {
+        try {
+          const url = `${APPS_SCRIPT_URL}?action=getClients&_t=${Date.now()}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            if (data?.clients && Array.isArray(data.clients)) {
+              setLocalCache("clients_v1", data.clients);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      })();
+      return cached;
+    }
+
     const url = `${APPS_SCRIPT_URL}?action=getClients`;
     console.log("🔄 Fetching dynamic clients...");
 
@@ -208,6 +281,9 @@ export const fetchDynamicClients = async () => {
 
     const data = await response.json();
     console.log("✅ Dynamic clients:", data.clients);
+    if (data.clients && Array.isArray(data.clients)) {
+      setLocalCache("clients_v1", data.clients);
+    }
     return data.clients || [];
   } catch (err) {
     console.error("❌ Error fetching dynamic clients:", err);
@@ -218,6 +294,26 @@ export const fetchDynamicClients = async () => {
 // Get dates for a specific client
 export const fetchDynamicDates = async (client) => {
   try {
+    // Instant cached dates by client
+    const cacheKey = `dates_${encodeURIComponent(client)}`;
+    const cached = getLocalCache(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      // Background refresh
+      (async () => {
+        try {
+          const url = `${APPS_SCRIPT_URL}?action=getDates&client=${encodeURIComponent(client)}&_t=${Date.now()}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            if (data?.dates && Array.isArray(data.dates)) {
+              setLocalCache(cacheKey, data.dates);
+            }
+          }
+        } catch (e) { }
+      })();
+      return cached;
+    }
+
     const url = `${APPS_SCRIPT_URL}?action=getDates&client=${encodeURIComponent(client)}`;
     console.log(`🔄 Fetching dates for client: ${client}`);
 
@@ -228,6 +324,9 @@ export const fetchDynamicDates = async (client) => {
 
     const data = await response.json();
     console.log(`✅ Dates for ${client}:`, data.dates);
+    if (data.dates && Array.isArray(data.dates)) {
+      setLocalCache(cacheKey, data.dates);
+    }
     return data.dates || [];
   } catch (err) {
     console.error("❌ Error fetching dynamic dates:", err);
@@ -238,6 +337,26 @@ export const fetchDynamicDates = async (client) => {
 // Get meals for a specific client and date
 export const fetchDynamicMeals = async (client, date) => {
   try {
+    // Instant cached meals by client+date
+    const cacheKey = `meals_${encodeURIComponent(client)}_${encodeURIComponent(date)}`;
+    const cached = getLocalCache(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      // Background refresh
+      (async () => {
+        try {
+          const url = `${APPS_SCRIPT_URL}?action=getMeals&client=${encodeURIComponent(client)}&date=${encodeURIComponent(date)}&_t=${Date.now()}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            if (data?.meals && Array.isArray(data.meals)) {
+              setLocalCache(cacheKey, data.meals);
+            }
+          }
+        } catch (e) { }
+      })();
+      return cached;
+    }
+
     const url = `${APPS_SCRIPT_URL}?action=getMeals&client=${encodeURIComponent(client)}&date=${encodeURIComponent(date)}`;
     console.log(`🔄 Fetching meals for ${client} on ${date}`);
 
@@ -248,6 +367,9 @@ export const fetchDynamicMeals = async (client, date) => {
 
     const data = await response.json();
     console.log(`✅ Meals for ${client} on ${date}:`, data.meals);
+    if (data.meals && Array.isArray(data.meals)) {
+      setLocalCache(cacheKey, data.meals);
+    }
     return data.meals || [];
   } catch (err) {
     console.error("❌ Error fetching dynamic meals:", err);
@@ -255,3 +377,68 @@ export const fetchDynamicMeals = async (client, date) => {
   }
 };
 
+
+// ----- NEW: Set all three filters at once (server-side verification) -----
+export const setFiltersAndVerify = async (client, date, meal) => {
+  try {
+    const params = new URLSearchParams({
+      action: "setFilters",
+      client: client || "",
+      date: date || "",
+      meal: meal || "",
+      // fast: "true", // ❌ REMOVED: This was preventing sheet formulas from recalculating
+      _t: Date.now().toString(),
+    });
+
+    const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
+    console.log("🛰️ Setting filters via Apps Script:", { client, date, meal });
+    console.log("🌐 URL:", url);
+
+    const res = await fetch(url, { method: "GET" });
+
+    console.log(`📊 setFilters Response status: ${res.status} ${res.statusText}`);
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`❌ HTTP Error ${res.status}:`, errorText);
+      throw new Error(`HTTP ${res.status}: ${errorText}`);
+    }
+
+    const data = await res.json();
+
+    console.log("📦 setFilters Response data:", data);
+
+    if (!data || data.success === false) {
+      console.error("❌ setFilters failed:", data?.error || "Unknown error");
+      throw new Error(data?.error || "setFilters failed");
+    }
+
+    console.log("🔎 Server verification:", data.verification);
+    return data.verification;
+  } catch (err) {
+    console.error("❌ Error in setFiltersAndVerify:", err);
+    console.error("❌ Error details:", err.message, err.stack);
+    throw err;
+  }
+};
+
+
+// ----- DIAGNOSTIC CHECK FUNCTION -----
+export const fetchDiagnosticReport = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=diagnostic&_t=${Date.now()}`;
+    console.log("🔍 Running diagnostic check...");
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("📊 Diagnostic Report:", data);
+    return data;
+  } catch (err) {
+    console.error("❌ Error fetching diagnostic report:", err);
+    throw err;
+  }
+};

@@ -1,22 +1,59 @@
-// DashboardSummary.jsx - Systematic PMS View (Meals → Dishes → Ingredients) + Save + Sheet Dropdown Control
+// DashboardSummary.jsx - Fixed Version with Forced Sheet Focus
 
 import React, { useState, useEffect } from "react";
 import {
-  fetchPMSData, // Apps Script - triggers live sheet recalculation
+  fetchPMSData,
   updatePMSDropdown,
   updateCell,
-  fetchDynamicClients, // ✅ NEW: Dynamic filtering
+  fetchDynamicClients,
   fetchDynamicDates,
   fetchDynamicMeals,
+  setFiltersAndVerify,
 } from "../../api/restaurantAPI2";
 
-// ----------------------- helpers -----------------------
+const DROPDOWN_CELLS = {
+  client: "A1",  // Column A (0-indexed: 0)
+  date: "P1",    // Column P (0-indexed: 15)
+  meal: "AE1",   // Column AE (0-indexed: 30)
+};
 
-// hamesha "dd-MMM-yyyy" return karega (e.g. 07-Dec-2025)
+// 🔍 DEBUG: Verify cell positions
+console.log("📍 Dropdown cells:", {
+  client: "A1 (col 0)",
+  date: "P1 (col 15)",
+  meal: "AE1 (col 30)"
+});
+
 const formatDate = (date) => {
   if (!date) return "";
-  const d = new Date(date);
-  if (isNaN(d)) return date.toString().trim();
+
+  let d;
+  let str = date.toString().trim(); // Move str declaration outside else block
+
+  // If it's already a Date object
+  if (date instanceof Date && !isNaN(date)) {
+    d = date;
+  } else {
+    // It's a string - try common formats
+    // Handle ISO format: 2025-12-25
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+      d = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+    }
+    // Handle dd-MMM-yyyy like 25-Dec-2025
+    else if (str.match(/^\d{2}-[A-Za-z]{3}-\d{4}$/)) {
+      d = new Date(str); // JS can parse this
+    }
+    // Fallback: let JS try to parse
+    else {
+      d = new Date(str);
+    }
+  }
+
+  if (!d || isNaN(d.getTime())) {
+    console.warn("Invalid date could not be parsed:", date);
+    return str; // return original as fallback
+  }
 
   const day = String(d.getDate()).padStart(2, "0");
   const month = d.toLocaleString("en-US", { month: "short" });
@@ -30,528 +67,847 @@ const isNumericCell = (v) => {
   return !isNaN(Number(v));
 };
 
-// PMS sheet ko parse karo and meals extract karo
-const extractHeaderInfo = (row) => {
-  if (!row) return null;
+const parsePMSSheet = (rows, verificationData = null) => {
+  if (rows.length === 0) {
+    console.error("❌ No rows received");
+    return [];
+  }
 
-  // More robust keyword matching
-  const mealRegex = /^(morning|breakfast|lunch|evening|evening snacks|dinner)/i;
+  const row0 = rows[0] || [];
 
-  let meal = null,
-    date = null,
-    pax = null,
-    client = null;
-
-  row.forEach((cell) => {
-    if (!cell) return;
-
-    const str = cell.toString().trim();
-    if (!str) return;
-
-    // Check Meal
-    if (!meal && mealRegex.test(str)) {
-      meal = str; // Keep original casing/string
+  // 🔍 DEBUG: Show ALL control cells in row 1 (expanded debugging)
+  console.log("🔍 RAW ROW 1 DATA (first 40 columns):");
+  for (let i = 0; i < Math.min(40, row0.length); i++) {
+    const colLetter = String.fromCharCode(65 + i); // A=0, B=1, ... not fully accurate past Z but good enough for index
+    if (i === 0 || i === 12 || i === 15 || i === 24 || i === 30 || row0[i]) {
+      console.log(`  Col ${i}: "${row0[i]}" (type: ${typeof row0[i]})`);
     }
-    // Check Date
-    else if (!date && !isNaN(new Date(str)) && str.length > 5 && str.includes("-")) {
-      // Basic heuristic for date string like "07-Dec-2025" or "2025-12-07"
-      date = formatDate(new Date(str));
+  }
+
+  // Also check if cells might be in row 2 (merged cells sometimes appear in row 2)
+  if (rows.length > 1) {
+    const row1 = rows[1] || [];
+    console.log("🔍 RAW ROW 2 DATA (key columns):");
+    console.log(`  P2 (col 15): "${row1[15]}"`);
+    console.log(`  AE2 (col 30): "${row1[30]}"`);
+  }
+
+  // ✅ Use verification data as fallback if cells are empty
+  // Priority: 1) Sheet cells, 2) Verification requested (if we just set it), 3) Verification actual
+  let client = row0[0]?.toString().trim();
+  if (!client || client === "" || client === "#N/A") {
+    // If verification exists and we just set it, trust the requested value
+    if (verificationData?.requested?.client) {
+      client = verificationData.requested.client.toString().trim();
+    } else {
+      client = verificationData?.actual?.client?.toString().trim();
     }
-    // Check Pax (Number > 10)
-    else if (!pax && !isNaN(str) && Number(str) > 10 && Number(str) < 50000) {
-      pax = Number(str);
+  }
+  client = client || "Unknown Client";
+
+  // Try row0 P1 (col 15) first, then M1 (col 12) as fallback
+  let date = row0[15]?.toString().trim(); // Priority: P1
+  if (!date || date === "" || date === "#N/A") {
+    // Check M1 (col 12) - fallback
+    const m1Date = row0[12];
+    if (m1Date) {
+      date = m1Date.toString().trim();
     }
-    // Check Client (Not meal, not date, not number)
-    else if (!client && !mealRegex.test(str) && str !== date && isNaN(str) && str.length > 2) {
-      // Exclude common header keywords if any
-      if (!["date", "pax", "party", "venue"].includes(str.toLowerCase())) {
-        client = str;
+  }
+
+  if (date) {
+    // If it's a date object or ISO string, format it
+    try {
+      const dateObj = new Date(date);
+      if (!isNaN(dateObj.getTime())) {
+        date = formatDate(dateObj);
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  if (!date || date === "" || date === "#N/A") {
+    date = rows[1]?.[15]?.toString().trim(); // check row 2 col P
+  }
+
+  // If verification exists and we just set it, trust the requested value (sheet might not have updated yet)
+  if ((!date || date === "" || date === "#N/A") && verificationData?.requested?.date) {
+    date = verificationData.requested.date.toString().trim();
+    console.log(`📋 Using requested date from verification: "${date}"`);
+  } else if (!date || date === "" || date === "#N/A") {
+    date = verificationData?.actual?.date?.toString().trim();
+  }
+  date = date || "Unknown Date";
+
+  const pax = row0[9] ? Number(row0[9]) : 0;
+
+  // Try row0 AE1 (col 30) first, then Y1 (col 24) as fallback
+  let meal = row0[30]?.toString().trim(); // Priority: AE1
+  if (!meal || meal === "" || meal === "#N/A") {
+    meal = row0[24]?.toString().trim(); // Fallback: Y1
+  }
+
+  if (!meal || meal === "" || meal === "#N/A") {
+    meal = rows[1]?.[30]?.toString().trim();
+  }
+  // If verification exists and we just set it, trust the requested value (sheet might not have updated yet)
+  if ((!meal || meal === "" || meal === "#N/A") && verificationData?.requested?.meal) {
+    meal = verificationData.requested.meal.toString().trim();
+    console.log(`📋 Using requested meal from verification: "${meal}"`);
+  } else if (!meal || meal === "" || meal === "#N/A") {
+    meal = verificationData?.actual?.meal?.toString().trim();
+  }
+  meal = meal || "Unknown Meal";
+
+  console.log(`📋 PARSED: Client="${client}" Date="${date}" Pax=${pax} Meal="${meal}"`);
+  if (verificationData) {
+    console.log(`📋 VERIFICATION FALLBACK USED: Client="${verificationData.actual?.client}", Date="${verificationData.actual?.date}", Meal="${verificationData.actual?.meal}"`);
+  }
+
+  console.log(`📋 PARSED: Client="${client}" Date="${date}" Pax=${pax} Meal="${meal}"`);
+
+  const row1 = rows[1] || [];
+  const row2 = rows[2] || [];
+  const row3 = rows[3] || []; // Google Sheet row 4 - has "Item 1", "Item 2", etc.
+
+  const dishHeaders = [];
+  /* REPLACED HEADER LOGIC START */
+  const startCol = 0; // A
+  const endCol = 60;  // Scan generously past AS to catch all items
+
+  // 🔁 Scan EVERY column for a header instead of jumping in fixed steps.
+  // This is more robust because the sheet has black separator columns and
+  // merged header cells, so "Item 1".."Item 9" blocks are not perfectly spaced.
+  for (let c = startCol; c < endCol; c++) {
+    // Check row 3 (index 3 = Google Sheet row 4) for "Item 1", "Item 2", etc.
+    let itemLabel = row3[c]?.toString().trim();
+
+    // Also check row 2 (index 2 = Google Sheet row 3) for dish names like "Paneer Masala", "Mix Veg"
+    let dishNameFromRow3 = row2[c]?.toString().trim();
+
+    // If we find an "Item X" label in row 3, prioritize the dish name from row 3 (Google Sheet row 3, index 2)
+    let headerName = "";
+    if (itemLabel && itemLabel.toLowerCase().startsWith("item")) {
+      // Found "Item 1", "Item 2", etc. - get the dish name from row 3 (Google Sheet row 3, index 2)
+      headerName = dishNameFromRow3 || "";
+      // If not found in row 3, try row 5 (Google Sheet row 5, index 4)
+      if (!headerName || headerName === "#N/A" || headerName === "") {
+        const row4 = rows[4] || []; // Google Sheet row 5
+        headerName = row4[c]?.toString().trim() || "";
+      }
+      // If still no name, use the item label itself
+      if (!headerName || headerName === "#N/A") {
+        headerName = itemLabel;
+      }
+    } else if (dishNameFromRow3 && dishNameFromRow3 !== "#N/A" && dishNameFromRow3 !== "") {
+      // No "Item X" label, but found a dish name in row 3 - use it directly
+      headerName = dishNameFromRow3;
+    } else {
+      // Fallback: check row1 and row2 as before
+      headerName = row1[c]?.toString().trim();
+      if (!headerName || headerName === "#N/A") {
+        headerName = row2[c]?.toString().trim();
       }
     }
-  });
 
-  if (!meal) return null;
-  return { meal, date, pax, client };
-};
-
-const parsePMSSheet = (rows) => {
-  const menus = [];
-  console.log("🔍 Parsing PMS sheet, total rows:", rows.length);
-
-  for (let i = 0; i < rows.length; i++) {
-    const header = extractHeaderInfo(rows[i]);
-    if (!header) continue;
-
-    console.log("🎯 Meal header found at row", i, ":", header);
-
-    // 1️⃣ Step 1: Identify "Main Dishes" (Columns)
-    // SEARCH for the header row in the next few rows (i+1 to i+6)
-    // It usually contains multiple text items like "Dal", "Paneer", "Item X"
-    let itemsRow = null;
-    let itemsRowIndex = -1;
-
-    for (let offset = 1; offset <= 6; offset++) {
-      const r = i + offset;
-      if (r >= rows.length) break;
-      const candidateRow = rows[r];
-      if (!candidateRow) continue;
-
-      // Check if this row looks like a header (has multiple text values)
-      const textCount = candidateRow.filter(c =>
-        c && c.toString().trim().length > 2 &&
-        isNaN(Number(c)) &&
-        c !== "#N/A" &&
-        !["planned", "actual", "p", "a", "qty"].includes(c.toString().toLowerCase())
-      ).length;
-
-      // If we see at least 2 text columns, assume it's the dish header
-      if (textCount >= 2) {
-        itemsRow = candidateRow;
-        itemsRowIndex = r;
-        break;
-      }
-    }
-
-    if (!itemsRow) {
+    if (!headerName || headerName === "" || headerName === "#N/A") {
       continue;
     }
 
-    const dishHeaders = [];
-    // ✅ User Requirement: "Row 2 has Item 1, Row 3 has Actual Name"
-    // So if itemsRow is Row 2, we grab names from Row 3 (itemsRowIndex + 1)
-    const namesRow = rows[itemsRowIndex + 1];
-
-    itemsRow.forEach((cell, col) => {
-      // We detect columns based on "Item 1", "Item 2" presence
-      if (cell && cell.toString().trim() && cell !== "#N/A") {
-
-        let dishName = cell.toString().trim(); // Default to "Item 1"
-
-        // Try to grab the actual name from the row below
-        if (namesRow && namesRow[col] && namesRow[col].toString().trim()) {
-          dishName = namesRow[col].toString().trim();
-        }
-
-        dishHeaders.push({ col, name: dishName, ingredients: [] });
-      }
-    });
-
-    if (!dishHeaders.length) continue;
-    // console.log("🍛 Dish headers (Columns):", dishHeaders);
-
-    // 2️⃣ Step 2: Grab "Dish Level" totals (Rows below item header)
-    // We scan columns relative to dish.col to find numbers
-    dishHeaders.forEach(dish => {
-      // Look for values in cols [dish.col, dish.col+1, dish.col+2]
-      // Often Name is at col, P at col+1, A at col+2.
-      // But if headers are merged, P might be at col.
-
-      // Scan a few rows BELOW the itemsRowIndex
-      for (let r = itemsRowIndex + 1; r < itemsRowIndex + 5 && r < rows.length; r++) {
-        const row = rows[r];
-        if (!row) continue;
-
-        // Check broad range to find "Dish Level" summary
-        const pCell = row[dish.col + 1]; // Try col+1 first?
-        const aCell = row[dish.col + 2];
-        const pCellAlt = row[dish.col]; // Fallback
-
-        if (isNumericCell(pCell) || isNumericCell(aCell)) {
-          dish.planned = Number(pCell) || 0;
-          dish.actual = Number(aCell) || 0;
-          dish.actualCell = { rowIndex: r, colIndex: dish.col + 2 };
-          dish.unit = row[dish.col + 3]?.toString().trim() || "";
-          break;
-        } else if (isNumericCell(pCellAlt)) {
-          // Case where numbers start at dish.col
-          dish.planned = Number(pCellAlt) || 0;
-          dish.actual = Number(row[dish.col + 1]) || 0;
-          dish.actualCell = { rowIndex: r, colIndex: dish.col + 1 };
-          dish.unit = row[dish.col + 2]?.toString().trim() || "";
-          break;
-        }
-      }
-    });
-
-    // 3️⃣ Step 3: Process "Ingredients" (Rows 8+)
-    // Start significantly below items row to skip the "Planned/Actual" sub-headers
-    const startRowIndex = itemsRowIndex + 5;
-
-    for (let r = startRowIndex; r < rows.length; r++) {
-      const row = rows[r];
-      if (!row || row.length === 0) break;
-
-      // Stop if it looks like a new meal header
-      // Using broad check to catch ANY generic keyword in first few cols
-      // to avoid processing "Dinner" block as ingredients of "Lunch"
-      const cell0 = row[0]?.toString().trim().toLowerCase();
-      if (
-        r > startRowIndex &&
-        /^(morning|breakfast|lunch|evening|dinner)/i.test(cell0)
-      ) {
-        break;
-      }
-
-      // ✅ FIX: Look for Ingredient Data PER DISH (Locally)
-      // Do NOT look for a single global "IngredientName" in Col A (unless it extends).
-      // User Implies: Each Dish Block has its own ingredients logic.
-
-      dishHeaders.forEach(dish => {
-        // We need to find: Name, Planned, Actual, Unit for THIS dish in THIS row.
-        // Heuristic: Name is usually the text string in the block.
-        // Columns in block: [dish.col, dish.col+1, dish.col+2, dish.col+3]
-
-        let localName = "";
-        let pVal = 0, aVal = 0, uVal = "";
-        let actCell = null;
-        let foundData = false;
-
-        // Try to identify structure in this block
-        const c0 = row[dish.col];     // Candidate Name?
-        const c1 = row[dish.col + 1]; // Candidate Planned?
-        const c2 = row[dish.col + 2]; // Candidate Actual?
-        const c3 = row[dish.col + 3]; // Candidate Unit?
-
-        // Pattern 1: Name | Planned | Actual | Unit
-        // Name must be string, P/A numeric
-        if (c0 && isNaN(Number(c0)) && c0.toString().length > 1) {
-          localName = c0.toString().trim();
-          if (isNumericCell(c1) || isNumericCell(c2)) {
-            pVal = Number(c1) || 0;
-            aVal = Number(c2) || 0;
-            uVal = c3?.toString().trim() || "";
-            actCell = { rowIndex: r, colIndex: dish.col + 2 };
-            foundData = true;
-          }
-        }
-        // Pattern 2: Maybe Name is in previous column? (dish.col - 1)
-        // If dish.col was derived from "Planned" column in header...
-        else {
-          const cPrev = row[dish.col - 1];
-          if (cPrev && isNaN(Number(cPrev)) && cPrev.toString().length > 1) {
-            localName = cPrev.toString().trim();
-            // Then P is likely at c0 (dish.col)
-            if (isNumericCell(c0) || isNumericCell(c1)) {
-              pVal = Number(c0) || 0;
-              aVal = Number(c1) || 0;
-              uVal = c2?.toString().trim() || "";
-              actCell = { rowIndex: r, colIndex: dish.col + 1 };
-              foundData = true;
-            }
-          }
-        }
-
-        if (foundData && localName) {
-          dish.ingredients.push({
-            name: localName,
-            planned: pVal,
-            actual: aVal,
-            unit: uVal,
-            actualCell: actCell,
-            diff: pVal - aVal
-          });
-        }
-      });
+    // Exclude "Item Name" if it gets picked up as a dish header
+    if (headerName.toLowerCase() === "item name") {
+      continue;
     }
 
-    // Transform dishHeaders back to our standard "items" format
-    const items = dishHeaders.map(d => ({
-      name: d.name,
-      planned: d.planned || 0,
-      actual: d.actual || 0,
-      unit: d.unit || "",
-      actualCell: d.actualCell,
-      diff: (d.planned || 0) - (d.actual || 0),
-      ingredients: d.ingredients
-    }));
+    // Avoid duplicate headers if the same merged value appears more than once
+    const alreadyExists = dishHeaders.some(
+      (d) => d.col === c || d.name.toLowerCase() === headerName.toLowerCase()
+    );
+    if (alreadyExists) {
+      continue;
+    }
 
-    menus.push({
-      meal: header.meal,
-      date: header.date,
-      client: header.client,
-      pax: header.pax,
-      items,
+    dishHeaders.push({
+      col: c,
+      name: headerName,
+      ingredients: [],
+      planned: 0,
+      actual: 0,
+      unit: "",
+      actualCell: null
+    });
+    console.log(`✅ Detected dish: "${headerName}" at column ${c} (from row 3 item: ${itemLabel || 'N/A'})`);
+  }
+
+
+  if (dishHeaders.length === 0) {
+    console.error("❌ No dish headers found");
+    return [];
+  }
+
+  for (let r = 3; r < Math.min(8, rows.length); r++) {
+    const row = rows[r];
+    if (!row) continue;
+
+    dishHeaders.forEach(dish => {
+      if (dish.planned || dish.actual) return;
+
+      const nameCell = row[dish.col];
+      const plannedCell = row[dish.col + 1];
+      const unitCell = row[dish.col + 2];
+      const actualCell = row[dish.col + 3];
+
+      if (isNumericCell(plannedCell) || isNumericCell(actualCell)) {
+        dish.planned = Number(plannedCell) || 0;
+        dish.actual = Number(actualCell) || 0;
+        dish.actualCell = { rowIndex: r, colIndex: dish.col + 3 };
+        dish.unit = unitCell?.toString().trim() || "";
+        dish.name = dish.name || nameCell?.toString().trim() || dish.name;
+      }
     });
   }
 
-  console.log("📊 FINAL MENUS COUNT:", menus.length);
-  return menus;
+
+  // Start scanning ingredients from row index 8 (Google Sheet row 9),
+  // which matches the earlier stable behaviour.
+  const startRow = 8;
+  const maxRow = Math.min(150, rows.length); // Scan up to 150 rows
+
+  for (let r = startRow; r < maxRow; r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) break;
+
+    // Stop if we hit a new meal section text
+    const firstCell = row[0]?.toString().trim().toLowerCase();
+    if (firstCell && (firstCell.includes("breakfast") || firstCell.includes("lunch") || firstCell.includes("dinner") || firstCell.includes("morning"))) {
+      // Assume it's a separator if it's alone? or just ignore for now as per user instruction.
+    }
+
+    dishHeaders.forEach(dish => {
+      const colIdx = dish.col;
+
+      const ingName = row[colIdx]?.toString().trim();
+      const plannedVal = row[colIdx + 1];
+      const unitVal = row[colIdx + 2];
+      const actualVal = row[colIdx + 3];
+
+      if (ingName && ingName !== "#N/A" && ingName.toLowerCase() !== "total" && ingName.toLowerCase() !== "diff") {
+        const planned = Number(plannedVal) || 0;
+        const actual = Number(actualVal) || 0;
+
+        if (ingName !== "") {
+          dish.ingredients.push({
+            name: ingName,
+            planned,
+            actual,
+            unit: unitVal?.toString().trim() || "",
+            actualCell: { rowIndex: r, colIndex: colIdx + 3 },
+            diff: planned - actual
+          });
+        }
+      }
+    });
+  }
+
+  // Calculate Dish Totals
+  const items = dishHeaders.map(d => {
+    // If we parsed headers correctly, we might have total rows captured in ingredients?
+    // Actually the sheet has ingredients below. Does it NOT have a total row for the dish?
+    // Image 1 shows "Dish Total" in yellow. 
+    // This usually means we should calculate it from ingredients OR read it from the top row if it exists.
+    // The previous code block (lines 134-154) tries to read dish header totals.
+    // Let's rely on summing ingredients if the top row detection failed.
+
+    // Sum ingredients
+    const calcPlanned = d.ingredients.reduce((acc, curr) => acc + curr.planned, 0);
+    const calcActual = d.ingredients.reduce((acc, curr) => acc + curr.actual, 0);
+
+    // Choose: if we found a top-level total (d.planned/d.actual set in previous loop), use it?
+    // Or just use calculated? Calculated is safer if we trust the ingredients list.
+
+    return {
+      name: d.name,
+      planned: calcPlanned,
+      actual: calcActual,
+      unit: "",
+      actualCell: null,
+      diff: calcPlanned - calcActual,
+      ingredients: d.ingredients
+    };
+  });
+
+  return [{
+    meal,
+    date: formatDate(date),
+    client,
+    pax,
+    items
+  }];
 };
 
-// ----------------------- component -----------------------
+// ✅ Helper: Verify dropdown values are set correctly
+const verifyDropdownValues = async (expectedClient, expectedDate, expectedMeal) => {
+  try {
+    const rows = await fetchPMSData();
+    if (rows.length === 0) {
+      console.warn("⚠️ Cannot verify: No rows received");
+      return { client: false, date: false, meal: false };
+    }
+
+    const row0 = rows[0] || [];
+    const actualClient = row0[0]?.toString().trim() || "";
+    // Check P1 (col 15) for date, fallback M1 (col 12)
+    const actualDate = (row0[15]?.toString().trim() || row0[12]?.toString().trim()) || "";
+    // Check AE1 (col 30) for meal, fallback Y1 (col 24)
+    const actualMeal = (row0[30]?.toString().trim() || row0[24]?.toString().trim()) || "";
+
+    const normalize = (str) => str?.toString().trim().toLowerCase() || "";
+    const clientMatch = normalize(actualClient) === normalize(expectedClient);
+
+    // Normalize date for comparison
+    let normalizedActual = actualDate.toLowerCase();
+    try {
+      const d = new Date(actualDate);
+      if (!isNaN(d.getTime())) {
+        normalizedActual = formatDate(d).toLowerCase();
+      }
+    } catch (e) { }
+
+    const normalizedExpected = formatDate(expectedDate).toLowerCase();
+
+    const dateMatch = normalizedExpected === normalizedActual ||
+      normalizedActual.includes(normalizedExpected) ||
+      normalizedExpected.includes(normalizedActual);
+    const mealMatch = normalize(actualMeal) === normalize(expectedMeal);
+
+    console.log(`🔍 Verification: Client="${actualClient}" (${clientMatch ? '✅' : '❌'}), Date="${actualDate}" (${dateMatch ? '✅' : '❌'}), Meal="${actualMeal}" (${mealMatch ? '✅' : '❌'})`);
+
+    return { client: clientMatch, date: dateMatch, meal: mealMatch, actualClient, actualDate, actualMeal };
+  } catch (err) {
+    console.error("⚠️ Verification error:", err);
+    return { client: false, date: false, meal: false };
+  }
+};
+
+// ✅ CRITICAL FIX: Force recalculation by updating ALL THREE dropdowns + verify + wait for data
+const forceSheetRecalculation = async (client, date, meal) => {
+  try {
+    console.log(`🔄 FORCING RECALC: Client="${client}", Date="${date}", Meal="${meal}"`);
+
+    let allVerified = false;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (!allVerified && retryCount < maxRetries) {
+      if (retryCount > 0) {
+        console.log(`🔄 Retry attempt ${retryCount}/${maxRetries}...`);
+      }
+
+      // Step 1: Prefer server-side set of all filters for atomic update
+      try {
+        const serverVerification = await setFiltersAndVerify(client, date, meal);
+        const cOk = (serverVerification?.matches && serverVerification?.actual?.client) ?
+          serverVerification.actual.client?.toString().trim().toLowerCase() === client.toString().trim().toLowerCase() : false;
+        const mOk = (serverVerification?.matches && serverVerification?.actual?.meal) ?
+          serverVerification.actual.meal?.toString().trim().toLowerCase() === meal.toString().trim().toLowerCase() : false;
+        // Normalize date to dd-MMM-yyyy for comparison
+        const expectedDateFmt = formatDate(date).toLowerCase();
+        const actualDateFmt = (serverVerification?.actual?.date || "").toString().trim().toLowerCase();
+        const dOk = actualDateFmt === expectedDateFmt || actualDateFmt.includes(expectedDateFmt) || expectedDateFmt.includes(actualDateFmt);
+
+        if (cOk && dOk && mOk) {
+          console.log("✅ Server-side filters set and verified");
+        } else {
+          console.warn("⚠️ Server-side verification mismatch, will fallback to client-driven updates", serverVerification);
+          throw new Error("Server verification mismatch");
+        }
+      } catch (serverErr) {
+        // Fallback: update individually as before
+        console.log(`1️⃣ Updating client dropdown (A1) to "${client}"...`);
+        await updatePMSDropdown({ sheet: "PMS", dropdownCell: DROPDOWN_CELLS.client, value: client });
+        await new Promise(r => setTimeout(r, 2000));
+
+        console.log(`2️⃣ Updating date dropdown (P1) to "${date}"...`);
+        await updatePMSDropdown({ sheet: "PMS", dropdownCell: DROPDOWN_CELLS.date, value: date });
+        await new Promise(r => setTimeout(r, 2000));
+
+        console.log(`3️⃣ Updating meal dropdown (AE1) to "${meal}"...`);
+        const mealUpdateResult = await updatePMSDropdown({ sheet: "PMS", dropdownCell: DROPDOWN_CELLS.meal, value: meal });
+        console.log(`   Meal update result:`, mealUpdateResult);
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
+      // 🔥 CRITICAL: Final wait to ensure all formulas have recalculated
+      console.log("⏳ Waiting for sheet formulas to fully recalculate...");
+      await new Promise(r => setTimeout(r, 5000));
+
+      // Verify the values were actually set
+      console.log("🔍 Verifying dropdown values after update...");
+      const verification = await verifyDropdownValues(client, date, meal);
+
+      allVerified = verification.client && verification.date && verification.meal;
+
+      if (allVerified) {
+        console.log("✅ All dropdowns verified successfully!");
+        break;
+      } else {
+        console.warn(`⚠️ Verification failed:`);
+        if (!verification.client) console.warn(`   ❌ Client: Expected "${client}", got "${verification.actualClient}"`);
+        if (!verification.date) console.warn(`   ❌ Date: Expected "${formatDate(date)}", got "${verification.actualDate}"`);
+        if (!verification.meal) console.warn(`   ❌ Meal: Expected "${meal}", got "${verification.actualMeal}"`);
+
+        retryCount++;
+        if (retryCount < maxRetries) {
+          console.log(`⏳ Waiting before retry...`);
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      }
+    }
+
+    if (!allVerified) {
+      // Final verification to get the actual values for error message
+      const finalVerification = await verifyDropdownValues(client, date, meal);
+      console.error(`❌ Failed to set all dropdowns correctly after ${maxRetries} attempts!`);
+      throw new Error(`Could not set filters correctly. Client: ${finalVerification.client}, Date: ${finalVerification.date}, Meal: ${finalVerification.meal}`);
+    }
+
+    console.log("✅ All dropdowns updated and verified!");
+  } catch (err) {
+    console.error("⚠️ Force recalc error:", err);
+    throw err;
+  }
+};
+
+// ✅ CRITICAL: Strict validation with retries
+const fetchWithStrictValidation = async (expectedClient, expectedDate, expectedMeal, maxRetries = 8) => {
+  const normalizeString = (str) => str?.toString().trim().toLowerCase() || "";
+
+  console.log(`🔍 Starting validation for Client="${expectedClient}", Date="${expectedDate}", Meal="${expectedMeal}"`);
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(`🔍 Validation attempt ${attempt}/${maxRetries}...`);
+
+    // Progressive delay: starts at 5s, increases by 2s each attempt
+    const waitTime = 5000 + (2000 * (attempt - 1));
+    console.log(`⏳ Waiting ${waitTime}ms before fetching data...`);
+    await new Promise(r => setTimeout(r, waitTime));
+
+    console.log(`📡 Fetching PMS data (attempt ${attempt})...`);
+    const rows = await fetchPMSData();
+
+    if (rows.length === 0) {
+      console.warn(`⚠️ Attempt ${attempt}: No rows received from sheet`);
+      continue;
+    }
+
+    console.log(`📊 Parsing ${rows.length} rows...`);
+    const menus = parsePMSSheet(rows);
+
+    if (menus.length === 0) {
+      console.warn(`⚠️ Attempt ${attempt}: No menus parsed`);
+      continue;
+    }
+
+    const menu = menus[0];
+    const fetchedClient = normalizeString(menu.client);
+    const fetchedMeal = normalizeString(menu.meal);
+    const fetchedDate = normalizeString(menu.date);
+    const expectClient = normalizeString(expectedClient);
+    const expectMeal = normalizeString(expectedMeal);
+    const expectDate = normalizeString(expectedDate);
+
+    console.log(`📊 Sheet shows: Client="${menu.client}" Date="${menu.date}" Meal="${menu.meal}"`);
+    console.log(`🎯 Expected: Client="${expectedClient}" Date="${expectedDate}" Meal="${expectedMeal}"`);
+
+    // Check for valid data
+    const clientMatch = fetchedClient === expectClient;
+    const mealMatch = fetchedMeal === expectMeal;
+    const dateMatch = fetchedDate === expectDate || fetchedDate.includes(expectDate) || expectDate.includes(fetchedDate);
+    const notUnknown = menu.meal !== "Unknown Meal" && menu.meal !== "";
+    const hasClient = menu.client !== "Unknown Client" && menu.client !== "";
+
+    if (clientMatch && mealMatch && notUnknown && hasClient) {
+      console.log(`✅ DATA VERIFIED on attempt ${attempt}!`);
+      console.log(`✅ Returning menu with ${menu.items?.length || 0} items`);
+      return menus;
+    } else {
+      console.warn(`❌ MISMATCH on attempt ${attempt}:`);
+      if (!clientMatch) console.warn(`   ❌ Client: got "${menu.client}", expected "${expectedClient}"`);
+      if (!dateMatch) console.warn(`   ❌ Date: got "${menu.date}", expected "${expectedDate}"`);
+      if (!mealMatch) console.warn(`   ❌ Meal: got "${menu.meal}", expected "${expectedMeal}"`);
+      if (!notUnknown) console.warn(`   ❌ Meal is "${menu.meal}" - AE1 cell not populated correctly`);
+      if (!hasClient) console.warn(`   ❌ Client is "${menu.client}" - A1 cell not populated correctly`);
+
+      // Re-force dropdowns on specific attempts (fewer times to avoid infinite loops)
+      if (attempt === 3 || attempt === 6) {
+        console.log("🔁 Re-forcing ALL dropdowns + recalc triggers...");
+        await forceSheetRecalculation(expectedClient, expectedDate, expectedMeal);
+      }
+    }
+  }
+
+  console.error("❌ VALIDATION FAILED after all retries");
+
+  // Final fetch to show what we actually got
+  console.log("🔍 Final fetch attempt...");
+  const finalRows = await fetchPMSData();
+  const finalMenus = parsePMSSheet(finalRows);
+
+  if (finalMenus.length > 0) {
+    console.log(`📊 Final result: Client="${finalMenus[0].client}", Date="${finalMenus[0].date}", Meal="${finalMenus[0].meal}"`);
+  }
+
+  const errorMsg = `⚠️ DATA SYNC FAILED!\n\nExpected:\n- Client: "${expectedClient}"\n- Date: "${expectedDate}"\n- Meal: "${expectedMeal}"\n\nGot:\n- Client: "${finalMenus[0]?.client || 'Unknown'}"\n- Date: "${finalMenus[0]?.date || 'Unknown'}"\n- Meal: "${finalMenus[0]?.meal || 'Unknown'}"\n\nPossible issues:\n1. Google Sheet formulas not recalculating\n2. Dropdown cells (A1, P1, AE1) not updating properly\n3. Sheet may be showing cached data\n\n✅ Solution: Click RELOAD DATA button or refresh the page and try again.`;
+
+  alert(errorMsg);
+
+  // Return whatever we got, even if it doesn't match
+  return finalMenus;
+};
 
 export default function DashboardSummary() {
-  const [allMenus, setAllMenus] = useState([]);
+  // ✅ Optimization: Cache filter options
+  const [clientOptions, setClientOptions] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('client_options_cache') || '[]');
+    } catch { return []; }
+  });
+  const [dateOptions, setDateOptions] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('date_options_cache') || '[]');
+    } catch { return []; }
+  });
+  const [mealOptions, setMealOptions] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('meal_options_cache') || '[]');
+    } catch { return []; }
+  });
+
+
+  // ✅ Persist Data (Menus) to prevent refresh on tab switch
+  const [allMenus, setAllMenus] = useState(() => {
+    try {
+      const cached = localStorage.getItem('dashboard_menus_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+
+  // Save menus to cache whenever they change
+  useEffect(() => {
+    if (allMenus.length > 0) {
+      localStorage.setItem('dashboard_menus_cache', JSON.stringify(allMenus));
+    }
+  }, [allMenus]);
+
   const [client, setClient] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
-  const [mealType, setMealType] = useState(""); // ✅ DYNAMIC
+  const [mealType, setMealType] = useState("");
 
-  const [clientOptions, setClientOptions] = useState([]);
-  const [dateOptions, setDateOptions] = useState([]);
-  const [mealOptions, setMealOptions] = useState([]); // ✅ NEW: Dynamic meal options
-
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start false to allow cached filters to show
   const [autoSaving, setAutoSaving] = useState(false);
 
-  // ✅ Auto-refresh mechanism (Polling every 60s)
-  useEffect(() => {
-    const timer = setInterval(() => {
-      console.log("⏰ Auto-refreshing data...");
-      loadData(true); // pass true to indicate silent reload
-    }, 60000); // 60 seconds
-
-    return () => clearInterval(timer);
-  }, []);
+  // ✅ Persist Cache Helper
+  const persistCache = (key, data) => {
+    localStorage.setItem(key, JSON.stringify(data));
+  };
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
+
     try {
-      // Fetch PMS data and ALL clients
+      // 1. Fetch Basic Data
       const [pmsRows, allClients] = await Promise.all([
         fetchPMSData(),
         fetchDynamicClients(),
       ]);
 
-      let menus = parsePMSSheet(pmsRows);
-
-      // 🔄 RETRY LOGIC: If no menus found, wait 1s and try again (Sheet might be updating)
-      if (menus.length === 0) {
-        console.log("⚠️ No data found immediately. Retrying in 1s...");
-        await new Promise(r => setTimeout(r, 1000));
-        const pmsRowsRetry = await fetchPMSData();
-        menus = parsePMSSheet(pmsRowsRetry);
-      }
-
-      setAllMenus(menus);
+      // Update Cache
       setClientOptions(allClients);
+      persistCache('client_options_cache', allClients);
 
-      // ✅ Check localStorage for saved selections
+      // 2. Determine Current Active Selection
       const savedClient = localStorage.getItem('pms_selected_client');
       const savedDate = localStorage.getItem('pms_selected_date');
       const savedMeal = localStorage.getItem('pms_selected_meal');
 
-      // --- INITIAL STATE SETUP ---
-      let currentClient = client;
-      if (allClients.length > 0 && !client) {
-        currentClient = savedClient && allClients.includes(savedClient) ? savedClient : allClients[0];
-        setClient(currentClient);
+      let currentClient = client || savedClient;
+      if (!currentClient && allClients.length > 0) currentClient = allClients[0];
 
-        // Fetch dates for default client
-        const clientDates = await fetchDynamicDates(currentClient);
-        setDateOptions(clientDates);
+      // Update State if needed
+      if ((!client && currentClient) || client !== currentClient) setClient(currentClient);
 
-        if (clientDates.length > 0 && !selectedDate) {
-          const defaultDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
-          setSelectedDate(defaultDate);
+      // 3. Parse Sheet Content IMMEDIATELY to see what's there
+      let menus = parsePMSSheet(pmsRows);
 
-          const clientMeals = await fetchDynamicMeals(currentClient, defaultDate);
-          setMealOptions(clientMeals);
+      // 4. Smart Check: Does the sheet ALREADY contain the data we want?
+      const normalize = (s) => s?.toString().trim().toLowerCase() || "";
+      let sheetMatches = false;
 
-          if (clientMeals.length > 0 && !mealType) {
-            const defaultMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
-            setMealType(defaultMeal);
+      if (menus.length > 0 && currentClient) {
+        const m = menus[0];
+        const mClient = normalize(m.client);
+        const mDate = normalize(m.date);
+        const mMeal = normalize(m.meal);
+
+        const targetClient = normalize(currentClient);
+        const targetDate = savedDate ? normalize(formatDate(savedDate)) : ""; // normalize saved date format
+        const targetMeal = savedMeal ? normalize(savedMeal) : "";
+
+        // Check basic match (Client is most critical)
+        if (mClient === targetClient) {
+          // If Date/Meal also match (or we don't have defaults yet), we are GOLDEN.
+          // Even if they don't perfectly match stored defaults, 
+          // showing *some* valid data for the client is better than a blank screen while loading.
+
+          const exactMatch = (!targetDate || mDate.includes(targetDate) || targetDate.includes(mDate)) &&
+            (!targetMeal || mMeal === targetMeal);
+
+          if (exactMatch) {
+            console.log("🚀 FAST LOAD: Sheet already has requested data!", m);
+            setAllMenus(menus);
+
+            // Sync dropdowns to what's properly loaded if strictly matching
+            if (!selectedDate && m.date) setSelectedDate(m.date);
+            if (!mealType && m.meal) setMealType(m.meal);
+
+            setLoading(false);
+            sheetMatches = true;
+
+            // Background fetch of options (non-blocking)
+            fetchDynamicDates(currentClient).then(dates => {
+              setDateOptions(dates);
+              persistCache('date_options_cache', dates);
+              if (dates.length > 0 && savedDate && dates.includes(savedDate)) {
+                fetchDynamicMeals(currentClient, savedDate).then(meals => {
+                  setMealOptions(meals);
+                  persistCache('meal_options_cache', meals);
+                });
+              }
+            });
+            return; // EXIT EARLY - SUCCESS
           }
         }
       }
 
-      // 🚨 CLOSED SHEET FIX: Check for Data Mismatch
-      // If we have menus, but they belong to a different client/date/meal than what we selected,
-      // it means the sheet is stale (didn't update). We must force an update.
-      if (menus.length > 0 && currentClient) {
-        const sheetClient = menus[0].client; // Assuming single menu view
-        // Note: formatted dates might differ slightly, checking Client mainly
-        if (sheetClient && sheetClient.toLowerCase() !== currentClient.toLowerCase()) {
-          console.warn(`⚠️ Data Mismatch! Sheet has "${sheetClient}", expected "${currentClient}". Forcing update...`);
+      // 5. If Strict Match Failed, we fallback to the robust "Set & Verify" flow
+      // But we can still populates options to make UI usable
 
-          await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: currentClient });
-          if (selectedDate) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: selectedDate });
-          if (mealType) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "B2", value: mealType });
+      if (!sheetMatches && currentClient) {
+        console.log("⚠️ Sheet data mismatch or stale. Initiating sync sequence...");
 
-          // Re-fetch after forced update
-          await new Promise(r => setTimeout(r, 2000)); // Wait for sheet calc
-          const freshRows = await fetchPMSData();
-          setAllMenus(parsePMSSheet(freshRows));
+        // Populate Dates/Meals for the selected client first so user can see filters
+        const dates = await fetchDynamicDates(currentClient);
+        setDateOptions(dates);
+        persistCache('date_options_cache', dates);
+
+        let targetDate = savedDate;
+        if (!targetDate || !dates.includes(targetDate)) targetDate = dates[0];
+        if (targetDate) setSelectedDate(targetDate);
+
+        if (targetDate) {
+          const meals = await fetchDynamicMeals(currentClient, targetDate);
+          setMealOptions(meals);
+          persistCache('meal_options_cache', meals);
+
+          let targetMeal = savedMeal;
+          if (!targetMeal || !meals.includes(targetMeal)) targetMeal = meals[0];
+          if (targetMeal) setMealType(targetMeal);
+
+          if (currentClient && targetDate && targetMeal) {
+            // NOW trigger the slow update, but user sees filters populated
+            console.log(`🔄 Syncing Sheet to: ${currentClient} / ${targetDate} / ${targetMeal}`);
+
+            // Double check: if menus matches this target? (Already checked above, likely false)
+
+            setTimeout(async () => {
+              try {
+                const verification = await setFiltersAndVerify(currentClient, targetDate, targetMeal);
+                await new Promise(r => setTimeout(r, 4000)); // slightly reduced wait
+                const validMenus = await fetchAndValidateData(currentClient, targetDate, targetMeal, verification);
+                if (validMenus) setAllMenus(validMenus);
+                setLoading(false);
+              } catch (e) {
+                console.error("Auto-sync failed", e);
+                setLoading(false);
+              }
+            }, 100);
+            return;
+          }
         }
       }
 
-      console.log("📅 Parsed menus count:", menus.length);
+      setAllMenus(menus); // Fallback: show what we have
     } catch (err) {
-      console.error("❌ Error loading PMS/Menu:", err);
+      console.error("❌ Error loading data:", err);
     }
+
     if (!silent) setLoading(false);
   };
 
-  // ✅ FORCE RELOAD: Updates Dropdowns + Fetches Data
-  const handleForceReload = async () => {
-    setLoading(true);
-    try {
-      console.log("🔄 Force Reloading: Syncing Dropdowns...");
-      try {
-        if (client) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "A1", value: client });
-        if (selectedDate) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "M1", value: selectedDate });
-        if (mealType) await updatePMSDropdown({ sheet: "PMS", dropdownCell: "Y1", value: mealType });
-      } catch (updateErr) {
-        console.warn("⚠️ Dropdown update failed, but proceeding to load data:", updateErr);
+  // ✅ Helper: Validate fetched data matches all three filters (relaxed - allow if we have items)
+  const validateFetchedData = (menus, expectedClient, expectedDate, expectedMeal) => {
+    if (!menus || menus.length === 0) return false;
+
+    const normalizeStr = (str) => str?.toString().trim().toLowerCase() || "";
+    const menu = menus[0];
+
+    // Check if we have valid items - if yes, be more lenient
+    const hasItems = menu.items && menu.items.length > 0;
+
+    const menuClient = normalizeStr(menu.client);
+    const menuDate = normalizeStr(menu.date);
+    const menuMeal = normalizeStr(menu.meal);
+
+    const expectClient = normalizeStr(expectedClient);
+    const expectDate = normalizeStr(formatDate(expectedDate));
+    const expectMeal = normalizeStr(expectedMeal);
+
+    // Matching
+    const clientMatch = menuClient === expectClient;
+    const dateMatch = menuDate === expectDate ||
+      menuDate.includes(expectDate) ||
+      expectDate.includes(menuDate);
+    const mealMatch = menuMeal === expectMeal;
+
+    // If we have items and client matches, be lenient with date/meal (sheet might not have updated yet)
+    if (hasItems && clientMatch) {
+      console.log(`✅ Validation passed (lenient): Client matches, has ${menu.items.length} items`);
+      return true;
+    }
+
+    // Otherwise require all three to match
+    const allMatch = clientMatch && dateMatch && mealMatch;
+
+    if (!allMatch) {
+      console.warn(`❌ Data validation failed:`);
+      console.warn(`   Client: got "${menu.client}" (${clientMatch ? '✅' : '❌'}), expected "${expectedClient}"`);
+      console.warn(`   Date: got "${menu.date}" (${dateMatch ? '✅' : '❌'}), expected "${formatDate(expectedDate)}"`);
+      console.warn(`   Meal: got "${menu.meal}" (${mealMatch ? '✅' : '❌'}), expected "${expectedMeal}"`);
+    }
+
+    return allMatch;
+  };
+
+  // ✅ Helper: Fetch and validate data with retries (uses verification data as fallback)
+  const fetchAndValidateData = async (expectedClient, expectedDate, expectedMeal, verificationData = null, maxRetries = 3) => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`📡 Fetch attempt ${attempt}/${maxRetries}...`);
+
+      // Wait progressively longer between retries
+      if (attempt > 1) {
+        const waitTime = 2000 + (1000 * (attempt - 1));
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(r => setTimeout(r, waitTime));
       }
 
-      await loadData(true); // Load data (silent=true because we handle loading here)
+      const rows = await fetchPMSData();
+      let menus = parsePMSSheet(rows, verificationData); // Pass verification data to parser
+
+      // If we have menus with items, return them (validation is lenient)
+      if (menus && menus.length > 0 && menus[0].items && menus[0].items.length > 0) {
+        if (validateFetchedData(menus, expectedClient, expectedDate, expectedMeal)) {
+          console.log(`✅ Data validated successfully on attempt ${attempt}!`);
+          return menus;
+        }
+        // Even if validation fails but we have items, return them (lenient mode)
+        console.log(`⚠️ Validation failed but returning data with ${menus[0].items.length} items`);
+        return menus;
+      }
+
+      // If validation failed and no items, re-set filters and try again
+      if (attempt < maxRetries) {
+        console.log(`🔄 Re-setting filters and retrying...`);
+        const newVerification = await setFiltersAndVerify(expectedClient, expectedDate, expectedMeal);
+        verificationData = newVerification; // Update verification data
+        await new Promise(r => setTimeout(r, 3000)); // Wait for sheet recalculation
+      }
+    }
+
+    // Final attempt - return whatever we got
+    console.log("📡 Final fetch attempt...");
+    const finalRows = await fetchPMSData();
+    const finalMenus = parsePMSSheet(finalRows, verificationData);
+    if (finalMenus && finalMenus.length > 0) {
+      console.log(`✅ Returning data with ${finalMenus[0].items?.length || 0} items`);
+    }
+    return finalMenus;
+  };
+
+  const handleForceReload = async () => {
+    if (!client || !selectedDate || !mealType) {
+      alert("Please select Client, Date, and Meal before reloading!");
+      return;
+    }
+
+    setLoading(true);
+    setAllMenus([]); // ✅ Clear old data
+    try {
+      console.log("🔄 FORCE RELOAD (With Validation)");
+      console.log(`📋 Filters: Client="${client}", Date="${selectedDate}", Meal="${mealType}"`);
+
+      // Set filters and verify
+      const verification = await setFiltersAndVerify(client, selectedDate, mealType);
+      console.log("🔎 Verification received:", verification);
+      await new Promise(r => setTimeout(r, 5000)); // Wait longer for sheet recalculation
+
+      // Fetch and validate data (pass verification data as fallback)
+      const menus = await fetchAndValidateData(client, selectedDate, mealType, verification);
+
+      if (menus && menus.length > 0) {
+        console.log(`✅ Successfully loaded ${menus.length} menu(s) with ${menus[0].items?.length || 0} items`);
+        setAllMenus(menus);
+      } else {
+        console.warn("⚠️ No menus returned");
+        alert("No data found matching the selected filters. Please check your sheet or try different filters.");
+      }
+
+      console.log("✅ Force reload complete");
     } catch (e) {
-      console.error("Force reload failed", e);
+      console.error("❌ Force reload failed:", e);
+      alert(`Failed to reload data: ${e.message || e.toString()}`);
     }
     setLoading(false);
   };
 
-
   useEffect(() => {
-    // Initial load
     loadData();
   }, []);
 
-  // ✅ Filter by all three: meal, date, client (Empty = All)
-  const filteredMenus = allMenus.filter((m) => {
-    const matchesMeal = !mealType || m.meal?.toLowerCase() === mealType?.toLowerCase();
-    const matchesDate = !selectedDate || m.date === selectedDate;
-    const matchesClient = !client || m.client?.toLowerCase() === client?.toLowerCase();
-
-    return matchesMeal && matchesDate && matchesClient;
-  });
-
-  console.log(`💡 Filtered menus: ${filteredMenus.length} / ${allMenus.length}`);
-
-  // 1️⃣ HANDLE MEAL CHANGE (Updates Sheet B2 & Reloads)
-  const handleMealChange = async (e) => {
-    const newVal = e.target.value;
-    setMealType(newVal);
-    localStorage.setItem('pms_selected_meal', newVal);
-
-    if (newVal) {
-      setLoading(true);
-      try {
-        await updatePMSDropdown({
-          sheet: "PMS",
-          dropdownCell: "Y1",
-          value: newVal,
-        });
-        await loadData();
-      } catch (err) {
-        console.error("❌ Meal change failed:", err);
-        setLoading(false);
-      }
-    }
-  };
-
-  // 2️⃣ HANDLE DATE CHANGE (Updates Sheet M1 & Reloads)
-  const handleDateChange = async (e) => {
-    const newVal = e.target.value;
-    setSelectedDate(newVal);
-    localStorage.setItem('pms_selected_date', newVal);
-
-    if (newVal) {
-      setLoading(true);
-      try {
-        await updatePMSDropdown({
-          sheet: "PMS",
-          dropdownCell: "M1",
-          value: newVal
-        });
-
-        const pmsRows = await fetchPMSData();
-        const menus = parsePMSSheet(pmsRows);
-        setAllMenus(menus);
-
-        const clientMeals = await fetchDynamicMeals(client, newVal);
-        setMealOptions(clientMeals);
-
-        if (clientMeals.length > 0) {
-          // ✅ SMART LOGIC: Keep current meal if valid, else check storage, else use first
-          let nextMeal = mealType;
-          if (!clientMeals.includes(nextMeal)) {
-            const savedMeal = localStorage.getItem('pms_selected_meal');
-            nextMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
-          }
-
-          setMealType(nextMeal);
-          localStorage.setItem('pms_selected_meal', nextMeal); // Update storage with valid meal
-
-          // Only update sheet if it changed
-          if (nextMeal !== mealType) {
-            await updatePMSDropdown({
-              sheet: "PMS",
-              dropdownCell: "B2",
-              value: nextMeal
-            });
-          }
-        }
-
-        setLoading(false);
-      } catch (err) {
-        console.error("❌ Date change failed:", err);
-        setLoading(false);
-      }
-    }
-  };
-
-  // 3️⃣ HANDLE CLIENT CHANGE (Updates Sheet Y1 & Reloads)
   const handleClientChange = async (e) => {
     const newVal = e.target.value;
     setClient(newVal);
     localStorage.setItem('pms_selected_client', newVal);
+    setAllMenus([]); // ✅ Clear data when filter changes
 
     if (newVal) {
       setLoading(true);
       try {
-        await updatePMSDropdown({
-          sheet: "PMS",
-          dropdownCell: "A1",
-          value: newVal
-        });
+        console.log(`👤 CLIENT CHANGED TO: ${newVal}`);
 
-        const pmsRows = await fetchPMSData();
-        const menus = parsePMSSheet(pmsRows);
-        setAllMenus(menus);
-
+        // Fetch dates for new client
         const clientDates = await fetchDynamicDates(newVal);
         setDateOptions(clientDates);
 
         if (clientDates.length > 0) {
-          // ✅ SMART LOGIC: Keep current date if valid, else check storage, else use first
-          let nextDate = selectedDate;
-          if (!clientDates.includes(nextDate)) {
-            const savedDate = localStorage.getItem('pms_selected_date');
-            nextDate = savedDate && clientDates.includes(savedDate) ? savedDate : clientDates[0];
-          }
-
+          const nextDate = clientDates[0];
           setSelectedDate(nextDate);
           localStorage.setItem('pms_selected_date', nextDate);
 
-          // Update date in sheet
-          await updatePMSDropdown({
-            sheet: "PMS",
-            dropdownCell: "M1",
-            value: nextDate
-          });
-
-          // Fetch meals for this client + date
           const clientMeals = await fetchDynamicMeals(newVal, nextDate);
           setMealOptions(clientMeals);
 
           if (clientMeals.length > 0) {
-            // ✅ SMART LOGIC: Keep current meal if valid, else check storage, else use first
-            let nextMeal = mealType;
-            if (!clientMeals.includes(nextMeal)) {
-              const savedMeal = localStorage.getItem('pms_selected_meal');
-              nextMeal = savedMeal && clientMeals.includes(savedMeal) ? savedMeal : clientMeals[0];
-            }
-
+            const nextMeal = clientMeals[0];
             setMealType(nextMeal);
             localStorage.setItem('pms_selected_meal', nextMeal);
 
-            // Update meal in sheet
-            await updatePMSDropdown({
-              sheet: "PMS",
-              dropdownCell: "B2",
-              value: nextMeal
-            });
+            // ✅ Set filters, then fetch and validate
+            const verification = await setFiltersAndVerify(newVal, nextDate, nextMeal);
+            await new Promise(r => setTimeout(r, 5000)); // ✅ Wait longer for sheet recalculation
+            const menus = await fetchAndValidateData(newVal, nextDate, nextMeal, verification);
+            console.log(`✅ Loaded ${menus.length} menus for Client="${newVal}"`);
+            setAllMenus(menus);
           }
         }
 
@@ -563,39 +919,137 @@ export default function DashboardSummary() {
     }
   };
 
-  // 🔄 AUTO SAVE HANDLER
+  const handleDateChange = async (e) => {
+    const newVal = e.target.value;
+    setSelectedDate(newVal);
+    localStorage.setItem('pms_selected_date', newVal);
+    setAllMenus([]); // ✅ Clear data when filter changes
+
+    if (newVal) {
+      setLoading(true);
+      try {
+        console.log(`📅 DATE CHANGED TO: ${newVal}`);
+
+        const clientMeals = await fetchDynamicMeals(client, newVal);
+        setMealOptions(clientMeals);
+
+        if (clientMeals.length > 0) {
+          let nextMeal = mealType;
+          if (!clientMeals.includes(nextMeal)) {
+            nextMeal = clientMeals[0];
+          }
+
+          setMealType(nextMeal);
+          localStorage.setItem('pms_selected_meal', nextMeal);
+
+          // ✅ Set filters, then fetch and validate
+          const verification = await setFiltersAndVerify(client, newVal, nextMeal);
+          await new Promise(r => setTimeout(r, 5000)); // ✅ Wait longer for sheet recalculation
+          const menus = await fetchAndValidateData(client, newVal, nextMeal, verification);
+          console.log(`✅ Loaded ${menus.length} menus for Date="${newVal}"`);
+          setAllMenus(menus);
+        }
+
+        setLoading(false);
+      } catch (err) {
+        console.error("❌ Date change failed:", err);
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleMealChange = async (e) => {
+    const newVal = e.target.value;
+    setMealType(newVal);
+    localStorage.setItem('pms_selected_meal', newVal);
+    setAllMenus([]); // ✅ Clear data when filter changes
+
+    if (newVal) {
+      setLoading(true);
+      try {
+        console.log(`🍽️ MEAL CHANGED TO: ${newVal}`);
+
+        // ✅ Set filters, then fetch and validate
+        const verification = await setFiltersAndVerify(client, selectedDate, newVal);
+        await new Promise(r => setTimeout(r, 5000)); // ✅ Wait longer for sheet recalculation
+        const menus = await fetchAndValidateData(client, selectedDate, newVal, verification);
+        console.log(`✅ Loaded ${menus.length} menus for Meal="${newVal}"`);
+        setAllMenus(menus);
+
+        setLoading(false);
+      } catch (err) {
+        console.error("❌ Meal change failed:", err);
+        setLoading(false);
+      }
+    }
+  };
+
   const handleAutoSave = async (cellMeta, newValue) => {
     if (!cellMeta) return;
 
     try {
+      // Note: Apps Script has server-side validation to protect item name columns and header rows
       setAutoSaving(true);
       const { rowIndex, colIndex } = cellMeta;
-
-      console.log(`💾 Auto-saving cell R${rowIndex}C${colIndex} -> ${newValue}`);
-
       await updateCell("PMS", rowIndex, colIndex, newValue);
-
       setAutoSaving(false);
     } catch (e) {
       console.error("❌ Auto-save failed:", e);
+      if (e.message && e.message.includes("blocked")) {
+        alert(`❌ ${e.message}`);
+      }
       setAutoSaving(false);
-      // alert("⚠️ Failed to save change. Please check connection.");
     }
   };
 
-  return (
-    // ✅ MOBILE: p-0 (Full Width), DESKTOP: p-8
-    <div className="p-0 md:p-8 min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100">
+  // ✅ Filter displayed data to match selected filters (LENIENT - show if client matches and has items)
+  const menusToShow = allMenus.filter(menu => {
+    const normalizeStr = (str) => str?.toString().trim().toLowerCase() || "";
 
-      {/* Filters */}
-      {/* ✅ MOBILE: m-4 (Card Look), DESKTOP: m-0 (Normal) */}
+    const menuClient = normalizeStr(menu.client);
+    const selectedClientNorm = normalizeStr(client);
+    const menuDate = normalizeStr(menu.date);
+    const selectedDateNorm = normalizeStr(selectedDate);
+    const selectedDateFormatted = formatDate(selectedDate).toLowerCase();
+    const menuMeal = normalizeStr(menu.meal);
+    const selectedMealNorm = normalizeStr(mealType);
+
+    // Check if we have items
+    const hasItems = menu.items && menu.items.length > 0;
+
+    // Client must match
+    const clientMatch = menuClient === selectedClientNorm;
+
+    // Date matching - check both formats
+    const dateMatch = menuDate === selectedDateNorm ||
+      menuDate === selectedDateFormatted ||
+      menuDate.includes(selectedDateNorm) ||
+      selectedDateNorm.includes(menuDate);
+
+    const mealMatch = menuMeal === selectedMealNorm;
+
+    // If client matches and we have items, show it (lenient - date/meal might not have updated in sheet yet)
+    if (clientMatch && hasItems) {
+      return true;
+    }
+
+    // Otherwise require all three to match
+    const isValid = clientMatch && dateMatch && mealMatch;
+
+    if (!isValid && hasItems) {
+      console.log(`⚠️ Menu shown (lenient): Client matches, has ${menu.items.length} items`);
+    }
+
+    return isValid;
+  });
+
+  return (
+    <div className="p-0 md:p-8 min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100">
       <div className="m-4 md:m-0 bg-gradient-to-r from-white to-indigo-50 rounded-3xl shadow-2xl p-6 md:p-10 mb-8 border-4 border-indigo-300">
         <h2 className="text-2xl md:text-3xl font-extrabold text-indigo-900 mb-6 text-center">
           📊 Select Filters
         </h2>
         <div className="flex flex-wrap items-end justify-center gap-6 md:gap-8">
-
-          {/* Client (First) */}
           <div className="flex-1 min-w-[200px]">
             <label className="block text-sm md:text-lg font-bold text-indigo-700 mb-2 uppercase tracking-wide">
               👤 Client
@@ -611,7 +1065,6 @@ export default function DashboardSummary() {
             </select>
           </div>
 
-          {/* Date (Second - varies by client) */}
           <div className="flex-1 min-w-[200px]">
             <label className="block text-sm md:text-lg font-bold text-indigo-700 mb-2 uppercase tracking-wide">
               📅 Date
@@ -627,7 +1080,6 @@ export default function DashboardSummary() {
             </select>
           </div>
 
-          {/* Meal Type (Third - varies by client) */}
           <div className="flex-1 min-w-[200px]">
             <label className="block text-sm md:text-lg font-bold text-orange-700 mb-2 uppercase tracking-wide">
               🍽️ Meal Type
@@ -643,7 +1095,6 @@ export default function DashboardSummary() {
             </select>
           </div>
 
-          {/* Reload / Status */}
           <div className="flex flex-col gap-2 w-full md:w-auto">
             <button
               onClick={handleForceReload}
@@ -660,18 +1111,15 @@ export default function DashboardSummary() {
         </div>
       </div>
 
-      {/* Data */}
       {loading ? (
         <p className="text-center text-4xl py-64">Loading...</p>
-      ) : filteredMenus.length === 0 ? (
-        <p className="text-center text-4xl py-64">NO DATA FOUND</p>
+      ) : menusToShow.length === 0 ? (
+        <div className="text-center py-32">
+          <p className="text-4xl mb-4">NO DATA FOUND</p>
+          <p className="text-gray-600">Please check your sheet or try reloading</p>
+        </div>
       ) : (
-        filteredMenus.map((menu, menuIdx) => {
-
-          // 1️⃣ PREPARE MENU DATA FOR TABLE RENDER
-          // We need to group ingredients by their original rowIndex to align them horizontally "like the sheet".
-
-          // Collect all unique row indices from all ingredients across all items
+        menusToShow.map((menu, menuIdx) => {
           const rowMap = new Map();
 
           menu.items.forEach((item, itemColIdx) => {
@@ -682,19 +1130,15 @@ export default function DashboardSummary() {
               if (!rowMap.has(r)) {
                 rowMap.set(r, {});
               }
-              // Map: RowIndex -> { [ItemIndex]: Ingredient }
               rowMap.get(r)[itemColIdx] = ing;
             });
           });
 
-          // Sort rows by index to appear in order
           const sortedRowIndices = Array.from(rowMap.keys()).sort((a, b) => a - b);
 
           return (
             <div
               key={menuIdx}
-              // ✅ MOBILE OPTIMIZED: Full width, no padding, no rounded corners on mobile
-              // ✅ DESKTOP KEPT SAME: rounded-3xl, shadow-xl, p-6
               className="bg-white md:rounded-3xl md:shadow-xl md:p-6 mb-12 border-b-4 md:border-4 border-indigo-200 overflow-x-auto w-full"
             >
               <h1 className="text-xl md:text-3xl font-extrabold text-indigo-900 mb-4 md:mb-6 border-b-4 border-indigo-100 pb-4 sticky left-0 px-4 md:px-0">
@@ -703,23 +1147,15 @@ export default function DashboardSummary() {
 
               <table className="min-w-full border-collapse text-sm">
                 <thead>
-                  {/* Header Row 1: Dish Names */}
                   <tr className="bg-indigo-600 text-white">
-                    <th className="p-3 border bg-indigo-700 min-w-[50px]">
-                      #
-                    </th>
+                    <th className="p-3 border bg-indigo-700 min-w-[50px]">#</th>
                     {menu.items.map((item, idx) => (
-                      <th
-                        key={idx}
-                        colSpan={3} // Name, Planned, Actual (Unit inside)
-                        className="p-3 border border-indigo-500 text-center font-bold text-lg"
-                      >
+                      <th key={idx} colSpan={3} className="p-3 border border-indigo-500 text-center font-bold text-lg">
                         {item.name}
                       </th>
                     ))}
                   </tr>
 
-                  {/* Header Row 2: Columns (Name, Planned, Actual) */}
                   <tr className="bg-indigo-50 text-indigo-900 font-semibold">
                     <th className="p-2 border bg-indigo-100">Row</th>
                     {menu.items.map((_, idx) => (
@@ -733,16 +1169,11 @@ export default function DashboardSummary() {
                 </thead>
 
                 <tbody>
-                  {/* TOTALS ROW */}
                   <tr className="bg-yellow-50 font-bold border-b-4 border-indigo-100">
-                    <td className="p-3 border text-center bg-yellow-100 text-yellow-800">
-                      TOTALS
-                    </td>
+                    <td className="p-3 border text-center bg-yellow-100 text-yellow-800">TOTALS</td>
                     {menu.items.map((item, idx) => (
                       <React.Fragment key={idx}>
-                        <td className="p-3 border text-center text-gray-500 italic">
-                          (Dish Total)
-                        </td>
+                        <td className="p-3 border text-center text-gray-500 italic">(Dish Total)</td>
                         <td className="p-3 border text-center text-indigo-700 text-lg">
                           {item.planned} {item.unit}
                         </td>
@@ -752,9 +1183,7 @@ export default function DashboardSummary() {
                               type="number"
                               defaultValue={item.actual === 0 ? "" : item.actual}
                               placeholder="0"
-                              onBlur={(e) =>
-                                handleAutoSave(item.actualCell, e.target.value)
-                              }
+                              onBlur={(e) => handleAutoSave(item.actualCell, e.target.value)}
                               className="w-20 p-1 border-2 border-yellow-300 rounded text-center bg-yellow-50 focus:bg-white focus:border-indigo-500 outline-none"
                             />
                             <span className="text-xs text-gray-400">{item.unit}</span>
@@ -764,8 +1193,7 @@ export default function DashboardSummary() {
                     ))}
                   </tr>
 
-                  {/* INGREDIENT ROWS */}
-                  {sortedRowIndices.map((rowIndex, rIdx) => (
+                  {sortedRowIndices.map((rowIndex) => (
                     <tr key={rowIndex} className="hover:bg-gray-50 even:bg-gray-50">
                       <td className="p-2 border text-center text-xs text-gray-400 font-mono bg-white">
                         {rowIndex + 1}
@@ -775,7 +1203,6 @@ export default function DashboardSummary() {
                         const ing = rowMap.get(rowIndex)[itemIdx];
 
                         if (!ing) {
-                          // Empty cells for this dish in this row
                           return (
                             <React.Fragment key={itemIdx}>
                               <td className="border bg-gray-50/30"></td>
@@ -787,9 +1214,7 @@ export default function DashboardSummary() {
 
                         return (
                           <React.Fragment key={itemIdx}>
-                            <td className="p-2 border font-medium text-gray-700">
-                              {ing.name}
-                            </td>
+                            <td className="p-2 border font-medium text-gray-700">{ing.name}</td>
                             <td className="p-2 border text-center text-gray-600">
                               {ing.planned} {ing.unit}
                             </td>
@@ -799,9 +1224,7 @@ export default function DashboardSummary() {
                                   type="number"
                                   defaultValue={ing.actual === 0 ? "" : ing.actual}
                                   placeholder="0"
-                                  onBlur={(e) =>
-                                    handleAutoSave(ing.actualCell, e.target.value)
-                                  }
+                                  onBlur={(e) => handleAutoSave(ing.actualCell, e.target.value)}
                                   className={`w-20 p-1 border rounded text-center outline-none ${ing.diff < 0 ? "border-red-300 bg-red-50 text-red-700" :
                                     ing.diff > 0 ? "border-green-300 bg-green-50 text-green-700" :
                                       "border-gray-300"

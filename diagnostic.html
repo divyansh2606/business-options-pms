@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PMS API Diagnostic Tool</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #0f0;
+        }
+
+        .container {
+            background: #000;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #0ff;
+            text-shadow: 0 0 10px #0ff;
+        }
+
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background: #0ff;
+            box-shadow: 0 0 20px #0ff;
+        }
+
+        .input-group {
+            margin: 15px 0;
+        }
+
+        label {
+            display: block;
+            color: #ff0;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            background: #222;
+            border: 1px solid #0f0;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        #output {
+            background: #111;
+            border: 1px solid #0f0;
+            padding: 15px;
+            margin-top: 20px;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .success {
+            color: #0f0;
+        }
+
+        .error {
+            color: #f00;
+        }
+
+        .warning {
+            color: #ff0;
+        }
+
+        .info {
+            color: #0ff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔧 PMS API DIAGNOSTIC TOOL 🔧</h1>
+
+        <div class="input-group">
+            <label>Apps Script URL:</label>
+            <input type="text" id="apiUrl"
+                value="https://script.google.com/macros/s/AKfycbyF4Na-85AjdEiSEpPbRFaVlkYFfxm20lJaqScCC4RCMqLwC-A4YljogErIRKjAtBKN/exec">
+        </div>
+
+        <div class="input-group">
+            <label>Client:</label>
+            <input type="text" id="clientInput" value="CIPLA" placeholder="e.g., CIPLA">
+        </div>
+
+        <div class="input-group">
+            <label>Date:</label>
+            <input type="text" id="dateInput" value="25-Dec-2025" placeholder="e.g., 25-Dec-2025">
+        </div>
+
+        <div class="input-group">
+            <label>Meal:</label>
+            <input type="text" id="mealInput" value="Lunch" placeholder="e.g., Lunch">
+        </div>
+
+        <div style="text-align: center; margin: 20px 0;">
+            <button onclick="testGetClients()">1. Test Get Clients</button>
+            <button onclick="testGetDates()">2. Test Get Dates</button>
+            <button onclick="testGetMeals()">3. Test Get Meals</button>
+            <button onclick="testSetFilters()">4. Test Set Filters</button>
+            <button onclick="testFetchPMS()">5. Test Fetch PMS Data</button>
+            <button onclick="testFullFlow()">🚀 TEST FULL FLOW</button>
+            <button onclick="clearOutput()">Clear Output</button>
+        </div>
+
+        <div id="output"></div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type;
+            output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+
+        function getApiUrl() {
+            return document.getElementById('apiUrl').value;
+        }
+
+        function getClient() {
+            return document.getElementById('clientInput').value;
+        }
+
+        function getDate() {
+            return document.getElementById('dateInput').value;
+        }
+
+        function getMeal() {
+            return document.getElementById('mealInput').value;
+        }
+
+        async function testGetClients() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log('TEST 1: Fetching Clients', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            try {
+                const url = `${getApiUrl()}?action=getClients&_t=${Date.now()}`;
+                log(`URL: ${url}`, 'info');
+
+                const response = await fetch(url);
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+                log(`Response Data:`, 'success');
+                log(JSON.stringify(data, null, 2), 'success');
+
+                if (data.clients && data.clients.length > 0) {
+                    log(`✅ Found ${data.clients.length} clients`, 'success');
+                } else {
+                    log(`⚠️ No clients found`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function testGetDates() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log('TEST 2: Fetching Dates', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            const client = getClient();
+            log(`Client: ${client}`, 'info');
+
+            try {
+                const url = `${getApiUrl()}?action=getDates&client=${encodeURIComponent(client)}&_t=${Date.now()}`;
+                log(`URL: ${url}`, 'info');
+
+                const response = await fetch(url);
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+                log(`Response Data:`, 'success');
+                log(JSON.stringify(data, null, 2), 'success');
+
+                if (data.dates && data.dates.length > 0) {
+                    log(`✅ Found ${data.dates.length} dates for ${client}`, 'success');
+                } else {
+                    log(`⚠️ No dates found for ${client}`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function testGetMeals() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log('TEST 3: Fetching Meals', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            const client = getClient();
+            const date = getDate();
+            log(`Client: ${client}`, 'info');
+            log(`Date: ${date}`, 'info');
+
+            try {
+                const url = `${getApiUrl()}?action=getMeals&client=${encodeURIComponent(client)}&date=${encodeURIComponent(date)}&_t=${Date.now()}`;
+                log(`URL: ${url}`, 'info');
+
+                const response = await fetch(url);
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+                log(`Response Data:`, 'success');
+                log(JSON.stringify(data, null, 2), 'success');
+
+                if (data.meals && data.meals.length > 0) {
+                    log(`✅ Found ${data.meals.length} meals for ${client} on ${date}`, 'success');
+                } else {
+                    log(`⚠️ No meals found for ${client} on ${date}`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function testSetFilters() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log('TEST 4: Setting Filters', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            const client = getClient();
+            const date = getDate();
+            const meal = getMeal();
+            log(`Client: ${client}`, 'info');
+            log(`Date: ${date}`, 'info');
+            log(`Meal: ${meal}`, 'info');
+
+            try {
+                const url = `${getApiUrl()}?action=setFilters&client=${encodeURIComponent(client)}&date=${encodeURIComponent(date)}&meal=${encodeURIComponent(meal)}&_t=${Date.now()}`;
+                log(`URL: ${url}`, 'info');
+
+                log(`Sending request...`, 'info');
+                const response = await fetch(url);
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+                log(`Response Data:`, 'success');
+                log(JSON.stringify(data, null, 2), 'success');
+
+                if (data.success && data.verification) {
+                    log(`✅ Filters set successfully!`, 'success');
+                    log(`Verification:`, 'success');
+                    log(`  Requested: ${JSON.stringify(data.verification.requested)}`, 'success');
+                    log(`  Actual: ${JSON.stringify(data.verification.actual)}`, 'success');
+                    log(`  Matches: ${data.verification.matches}`, data.verification.matches ? 'success' : 'error');
+
+                    log(`\n⏳ Waiting 3 seconds for sheet recalculation...`, 'warning');
+                    await new Promise(r => setTimeout(r, 3000));
+                    log(`✅ Wait complete`, 'success');
+                } else {
+                    log(`⚠️ setFilters returned but may have failed`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function testFetchPMS() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log('TEST 5: Fetching PMS Data', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            try {
+                const url = `${getApiUrl()}?sheet=PMS&_t=${Date.now()}`;
+                log(`URL: ${url}`, 'info');
+
+                const response = await fetch(url);
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+
+                if (data.error) {
+                    log(`❌ Error from server: ${data.error}`, 'error');
+                    return;
+                }
+
+                log(`✅ Received ${data.length} rows`, 'success');
+
+                if (data.length > 0) {
+                    const row0 = data[0];
+                    log(`\n📊 ROW 1 (Control cells):`, 'info');
+                    log(`  A1  (col 0):  "${row0[0]}"  ← Client`, 'info');
+                    log(`  M1  (col 12): "${row0[12]}" ← Date`, 'info');
+                    log(`  Y1  (col 24): "${row0[24]}" ← Meal`, 'info');
+                    log(`  J1  (col 9):  "${row0[9]}"  ← Pax`, 'info');
+
+                    if (!row0[12] || row0[12] === '') {
+                        log(`⚠️ WARNING: M1 (Date) is EMPTY!`, 'warning');
+                    }
+                    if (!row0[24] || row0[24] === '') {
+                        log(`⚠️ WARNING: Y1 (Meal) is EMPTY!`, 'warning');
+                    }
+                } else {
+                    log(`⚠️ No data rows received`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                log(error.stack, 'error');
+            }
+        }
+
+        async function testFullFlow() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log(' 🚀 FULL FLOW TEST - THIS IS THE REAL DEAL 🚀 ', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            const client = getClient();
+            const date = getDate();
+            const meal = getMeal();
+
+            log(`\n📋 Test Parameters:`, 'info');
+            log(`  Client: ${client}`, 'info');
+            log(`  Date: ${date}`, 'info');
+            log(`  Meal: ${meal}`, 'info');
+
+            // Step 1: Set Filters
+            log(`\n━━━ STEP 1: Setting Filters ━━━`, 'warning');
+            try {
+                const url1 = `${getApiUrl()}?action=setFilters&client=${encodeURIComponent(client)}&date=${encodeURIComponent(date)}&meal=${encodeURIComponent(meal)}&_t=${Date.now()}`;
+                log(`URL: ${url1}`, 'info');
+
+                const res1 = await fetch(url1);
+                log(`Response: ${res1.status} ${res1.statusText}`, res1.ok ? 'success' : 'error');
+
+                const data1 = await res1.json();
+                log(`Server says: ${JSON.stringify(data1, null, 2)}`, 'success');
+
+                if (data1.verification) {
+                    log(`Verification matches: ${data1.verification.matches ? '✅ YES' : '❌ NO'}`, data1.verification.matches ? 'success' : 'error');
+                }
+            } catch (error) {
+                log(`❌ Step 1 FAILED: ${error.message}`, 'error');
+                return;
+            }
+
+            // Step 2: Wait for recalculation
+            log(`\n━━━ STEP 2: Waiting for Sheet Recalculation ━━━`, 'warning');
+            log(`⏳ Waiting 3 seconds...`, 'info');
+            await new Promise(r => setTimeout(r, 3000));
+            log(`✅ Wait complete`, 'success');
+
+            // Step 3: Fetch PMS Data
+            log(`\n━━━ STEP 3: Fetching PMS Data ━━━`, 'warning');
+            try {
+                const url2 = `${getApiUrl()}?sheet=PMS&_t=${Date.now()}`;
+                log(`URL: ${url2}`, 'info');
+
+                const res2 = await fetch(url2);
+                log(`Response: ${res2.status} ${res2.statusText}`, res2.ok ? 'success' : 'error');
+
+                const data2 = await res2.json();
+                log(`Received ${data2.length} rows`, 'success');
+
+                if (data2.length > 0) {
+                    const row0 = data2[0];
+                    log(`\n📊 CONTROL CELLS:`, 'info');
+                    log(`  A1 (Client): "${row0[0]}"`, row0[0] === client ? 'success' : 'error');
+                    log(`  M1 (Date):   "${row0[12]}"`, row0[12] && row0[12] !== '' ? 'success' : 'error');
+                    log(`  Y1 (Meal):   "${row0[24]}"`, row0[24] === meal ? 'success' : 'error');
+
+                    // Final verdict
+                    log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'info');
+                    if (row0[0] === client && row0[12] && row0[12] !== '' && row0[24] === meal) {
+                        log(`🎉 SUCCESS! All filters are correctly set!`, 'success');
+                        log(`The application should work now.`, 'success');
+                    } else {
+                        log(`❌ FAILURE! Filters are NOT correctly set!`, 'error');
+                        log(`This explains why "NO DATA FOUND" appears.`, 'error');
+                        log(`\nPossible issues:`, 'warning');
+                        if (row0[0] !== client) log(`  - Client mismatch`, 'warning');
+                        if (!row0[12] || row0[12] === '') log(`  - Date (M1) is EMPTY`, 'warning');
+                        if (row0[24] !== meal) log(`  - Meal mismatch`, 'warning');
+                    }
+                }
+            } catch (error) {
+                log(`❌ Step 3 FAILED: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+
+</html>
