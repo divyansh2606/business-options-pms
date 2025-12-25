@@ -32,7 +32,7 @@ export default function PendingStockPage() {
                     console.log('HeaderRow1 length:', response.headerRow1?.length);
                     console.log('HeaderRow2 length:', response.headerRow2?.length);
                     console.log('Data length:', response.data?.length);
-                    
+
                     setHeaderRow1(response.headerRow1 || []);
                     setHeaderRow2(response.headerRow2 || []);
                     // Ensure data is always an array
@@ -70,7 +70,7 @@ export default function PendingStockPage() {
                 <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-0 text-center sm:text-left">
                     <div>
                         <button
-                            onClick={() => navigate(-1)}
+                            onClick={() => navigate('/dashboard?tab=stock', { state: { user } })}
                             className="flex items-center justify-center sm:justify-start text-blue-600 hover:text-blue-800 mb-3 transition-colors"
                         >
                             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">

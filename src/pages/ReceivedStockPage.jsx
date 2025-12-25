@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchStockOrders, saveReceivedStock } from '../api/stockAPI';
 
 const normalizeOrders = (rows) =>
@@ -23,6 +23,8 @@ const normalizeOrders = (rows) =>
 
 export default function ReceivedStockPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const user = location.state?.user;
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -149,7 +151,7 @@ export default function ReceivedStockPage() {
         <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-0 text-center sm:text-left">
           <div>
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => navigate('/dashboard?tab=stock', { state: { user } })}
               className="flex items-center justify-center sm:justify-start text-blue-600 hover:text-blue-800 mb-3 transition-colors"
             >
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">

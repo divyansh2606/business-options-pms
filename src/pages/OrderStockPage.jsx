@@ -344,7 +344,7 @@ export default function OrderStockPage() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-0">
           <h1 className="text-2xl font-bold text-gray-800">Order Stock</h1>
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/dashboard?tab=stock', { state: { user } })}
             className="w-full sm:w-auto px-4 py-2 text-sm rounded-lg bg-white shadow hover:bg-gray-100"
           >
             ← Back to Dashboard

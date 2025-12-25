@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 
 // Import components
 import Sidebar from "../../components/Sidebar";
@@ -18,9 +18,11 @@ import { fetchPMSData, fetchRecipeData } from "../../api/restaurantAPI";
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const user = location.state?.user;
 
-  const [activeTab, setActiveTab] = useState("dashboard");
+  // Initialize activeTab from URL or default to "dashboard"
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "dashboard");
   const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [data, setData] = useState({
@@ -31,6 +33,12 @@ export default function Dashboard() {
     financial: [],
     dashboard: {}
   });
+
+  // Sync state with URL when URL changes (e.g. back button)
+  useEffect(() => {
+    const currentTab = searchParams.get("tab") || "dashboard";
+    setActiveTab(currentTab);
+  }, [searchParams]);
 
   // Google Sheets se data fetch karne ke liye
   useEffect(() => {
@@ -80,6 +88,7 @@ export default function Dashboard() {
 
   const handleTabChange = (tabId) => {
     setActiveTab(tabId);
+    setSearchParams({ tab: tabId }, { state: location.state });
   };
 
 
