@@ -1,7 +1,7 @@
 // src/api/restaurantAPI2.js - Apps Script Method (with MENU options)
 
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbwYKRNanvcuOShPYZvUgCUSU6xmOzMab-9TRzMKKksm0RG_NLp4dGDXkEPIEhnfkGy1/exec";
+  "https://script.google.com/macros/s/AKfycbxZY1V-n4iW8rn8Up-NPSyYw-4CdESiyWbqGU7bso-N523vJ5HF2A5mEtHRq9QhgDy5/exec";
 // ------- Lightweight localStorage cache helpers -------
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -32,9 +32,18 @@ function setLocalCache(key, value, ttlMs = CACHE_TTL_MS) {
     console.warn("Local cache write error:", e);
   }
 }
-async function fetchSheetData(sheetName) {
+async function fetchSheetData(sheetName, options = {}) {
   try {
-    const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`;
+    const { rows, cols, range, noCache } = options || {};
+    const params = new URLSearchParams({
+      action: "fetch",
+      sheet: sheetName,
+    });
+    if (range) params.set("range", range);
+    if (rows) params.set("rows", String(rows));
+    if (cols) params.set("cols", String(cols));
+    if (noCache) params.set("_t", String(Date.now())); // only when you really need cache-bust
+    const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
 
     console.log(`📡 Fetching "${sheetName}" from Apps Script...`);
     console.log(`🌐 URL: ${url}`);
@@ -73,7 +82,7 @@ async function fetchSheetData(sheetName) {
 // ----- PMS DATA (actual menu + items) -----
 export const fetchPMSData = async () => {
   console.log("🔄 Fetching PMS Data via Apps Script...");
-  const data = await fetchSheetData("PMS");
+  const data = await fetchSheetData("PMS", { rows: 200, cols: 60 });
   console.log(`✅ TOTAL PMS ROWS: ${data.length}`);
 
   if (data.length > 50) {
@@ -86,13 +95,13 @@ export const fetchPMSData = async () => {
 // ----- RECIPE DATA -----
 export const fetchRecipeData = async () => {
   console.log("🔄 Fetching Recipe Data...");
-  return await fetchSheetData("P Vs A (Recipe)");
+  return await fetchSheetData("P Vs A (Recipe)", { rows: 2000, cols: 40 });
 };
 
 // ----- MENU OPTIONS -----
 export const fetchMenuOptions = async () => {
   console.log("🔄 Fetching MENU (dropdown options)...");
-  const rows = await fetchSheetData("MENU");
+  const rows = await fetchSheetData("MENU", { rows: 5000, cols: 3 });
 
   const mealSet = new Set();
   const clientSet = new Set();
@@ -379,19 +388,41 @@ export const fetchDynamicMeals = async (client, date) => {
 
 
 // ----- NEW: Set all three filters at once (server-side verification) -----
+// ----- NEW: Set all three filters at once (server-side verification) -----
 export const setFiltersAndVerify = async (client, date, meal) => {
   try {
+    console.log("🛠️ Calling setFilters action to update dropdowns and verify...");
+
+    // Support both plain values and { value, fast } objects coming from UI
+    const normalize = (x) => {
+      if (x && typeof x === "object") {
+        return {
+          value: x.value !== undefined ? x.value : "",
+          fast: !!x.fast,
+        };
+      }
+      return { value: x || "", fast: false };
+    };
+
+    const c = normalize(client);
+    const d = normalize(date);
+    const m = normalize(meal);
+
+    // If any argument is marked fast, run setFilters in fast mode (skips server-side sleep)
+    const fast = c.fast || d.fast || m.fast;
+
     const params = new URLSearchParams({
       action: "setFilters",
-      client: client || "",
-      date: date || "",
-      meal: meal || "",
-      // fast: "true", // ❌ REMOVED: This was preventing sheet formulas from recalculating
+      client: c.value || "",
+      date: d.value || "",
+      meal: m.value || "",
       _t: Date.now().toString(),
     });
 
+    if (fast) params.set("fast", "true");
+
     const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
-    console.log("🛰️ Setting filters via Apps Script:", { client, date, meal });
+    console.log("🛰️ Verifying filters via Apps Script:", { client: c.value, date: d.value, meal: m.value, fast });
     console.log("🌐 URL:", url);
 
     const res = await fetch(url, { method: "GET" });

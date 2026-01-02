@@ -1,5 +1,5 @@
 
-const STOCK_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxDTPKbWz5FgBi9zJzFsECmt1jl-NOywdPV6wk1PXbN0jEW9y9HZE5FTgcW9LiJsOnL/exec";
+const STOCK_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxZY1V-n4iW8rn8Up-NPSyYw-4CdESiyWbqGU7bso-N523vJ5HF2A5mEtHRq9QhgDy5/exec";
 
 async function fetchStockOrders() {
     try {

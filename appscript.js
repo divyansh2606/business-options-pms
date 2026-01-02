@@ -3,142 +3,148 @@
 
 function copyMenuData() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sourceSheet = ss.getSheetByName("PMS");   // source sheet name
-    const targetSheet = ss.getSheetByName("P VS A(Item Wise)");  // target sheet name
+    const sourceSheet = ss.getSheetByName("PMS");
+    const targetSheet = ss.getSheetByName("ingredient");
 
-    // --- Cells jahan se Client, Venue, Date milta hai ---
-    const client = sourceSheet.getRange("Y1").getValue();  // client name
-    const venue = sourceSheet.getRange("A1").getValue();   // venue
-    const menuDate = sourceSheet.getRange("M1").getValue(); // date
+    const client = sourceSheet.getRange("A1").getValue();
+    const venue = sourceSheet.getRange("A2").getValue();
+    const menuDate = sourceSheet.getRange("P1").getValue();
 
-    // --- Find last row of data ---
+    // 🔹 NEW: L1 & L2
+    const l1 = sourceSheet.getRange("L1").getValue();
+    const l2 = sourceSheet.getRange("L2").getValue();
+
     const lastRow = sourceSheet.getLastRow();
-    const dataRange = sourceSheet.getRange("AK7:AV" + lastRow); // data from A7 to N:lastRow
-    const data = dataRange.getValues();
+    if (lastRow < 10) {
+        SpreadsheetApp.getUi().alert("No data to copy!");
+        return;
+    }
 
-    // --- Filter out blank rows ---
-    const filteredData = data.filter(row => row.join("") !== "");
+    const data = sourceSheet.getRange("A10:BE" + lastRow).getValues();
+    const filteredData = data.filter(r => r.some(c => c !== ""));
 
     if (filteredData.length === 0) {
         SpreadsheetApp.getUi().alert("No data to copy!");
         return;
     }
 
-    // --- Add Client, Venue, Date columns to each row ---
-    const updatedData = filteredData.map(r => [...r, client, venue, menuDate]);
+    // 🔹 Yahan L1 & L2 add kiya
+    const updatedData = filteredData.map(r => [
+        ...r,
+        client,
+        venue,
+        menuDate,
+        l1,
+        l2
+    ]);
 
-    // --- Find next empty row in target sheet ---
-    const lastTargetRow = targetSheet.getLastRow();
-    const startRow = lastTargetRow === 0 ? 1 : lastTargetRow + 1;
-
-    // --- Paste data ---
-    targetSheet.getRange(startRow, 1, updatedData.length, updatedData[0].length)
+    const startRow = targetSheet.getLastRow() + 1;
+    targetSheet
+        .getRange(startRow, 1, updatedData.length, updatedData[0].length)
         .setValues(updatedData);
 
-    SpreadsheetApp.getUi().alert("Data copied successfully with Client, Venue, and Date!");
+    SpreadsheetApp.getUi().alert("Data copied successfully!");
 }
+
+
+
+
+
 
 function pasteFullData() {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var src = ss.getSheetByName("PMS");
-    var dst = ss.getSheetByName("P Vs A (Recipe)");
+    var dst = ss.getSheetByName("Weight");
 
-    // ----- Read main header values -----
-    var venue = src.getRange("A1").getValue();
-    var date = src.getRange("M1").getValue();
-    var company = src.getRange("Y1").getValue();
-    var personCount = src.getRange("J1").getValue();   // NEW ADDED
+    var company = src.getRange("A1").getValue();
+    var venue = src.getRange("A2").getValue();
+    var date = src.getRange("P1").getValue();
 
-    // ----- Menu Block (A5:AJ6) -----
-    var menuBlock = src.getRange("A2:AJ3").getValues();
+    // ✅ FULL RANGE L1:O2
+    var personCount = src.getRange("L1:O2").getValues();
 
-    // ----- Planned / Actual / Diff Block (A7:AJ25) -----
-    var planBlock = src.getRange("A5:AJ6").getValues();
+    var menuBlock = src.getRange("A3:AX4").getValues();
+    var planBlock = src.getRange("A7:AX8").getValues();
 
-    // ----- Find next empty row in destination -----
     var nextRow = dst.getLastRow() + 1;
 
-    // ----- Paste Header: Venue, Date, Company, Person -----
     dst.getRange(nextRow, 1).setValue(venue);
     dst.getRange(nextRow, 2).setValue(date);
     dst.getRange(nextRow, 3).setValue(company);
-    dst.getRange(nextRow, 4).setValue(personCount);   // NEW ADDED
 
-    // ----- Paste Menu Block starting column 5 -----
-    dst.getRange(nextRow, 5, menuBlock.length, menuBlock[0].length).setValues(menuBlock);
+    // ✅ Paste L1:O2 properly
+    dst.getRange(
+        nextRow,
+        4,
+        personCount.length,
+        personCount[0].length
+    ).setValues(personCount);
 
-    // ----- Paste Planned/Actual Block (below menu) -----
+    dst.getRange(
+        nextRow,
+        8,
+        menuBlock.length,
+        menuBlock[0].length
+    ).setValues(menuBlock);
+
     var planStartRow = nextRow + menuBlock.length;
-    dst.getRange(planStartRow, 5, planBlock.length, planBlock[0].length).setValues(planBlock);
+    dst.getRange(
+        planStartRow,
+        8,
+        planBlock.length,
+        planBlock[0].length
+    ).setValues(planBlock);
 
     SpreadsheetApp.flush();
 }
 
-function sendMergedSheetEmail() {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("P Vs A (Recipe)");
-    var data = sheet.getDataRange().getDisplayValues();
 
-    // Replace with your deployed Web App URL
-    // Use ScriptApp.getService().getUrl() to dynamically get the current URL if preferred, or hardcode.
-    // Keeping logic similar to original but generic or hardcoded if user had one.
-    var webAppUrl = ScriptApp.getService().getUrl();
 
-    var html = "<h2>Daily Planned Vs Actual Report</h2>";
-    html += "<form method='post' action='" + webAppUrl + "'>"; // submit to web app
-    html += "<table border='1' style='border-collapse:collapse;'>";
+// 🔹 Sirf row 8 clear karega
+function clearPMSRow8() {
+    const sheet = SpreadsheetApp.getActive().getSheetByName("PMS");
+    ["D8", "I8", "N8", "S8", "X8", "AC8", "AH8", "AM8", "AR8", "AW8"]
+        .forEach(c => sheet.getRange(c).clearContent());
+}
 
-    for (var i = 0; i < data.length; i++) {
-        var row = data[i];
-        var nonEmptyCount = row.filter(c => c !== "").length;
-        var blankCount = row.filter(c => c === "").length;
+// 🔹 Row 11 se lastRow tak clear karega
+function clearPMSFrom11() {
+    const sheet = SpreadsheetApp.getActive().getSheetByName("PMS");
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 11) return;
 
-        if (row[0] !== "" && blankCount > row.length / 2) {
-            // Item / Recipe row
-            html += "<tr>";
-            var j = 0;
-            while (j < row.length) {
-                if (row[j] !== "") {
-                    var colspan = 1;
-                    for (var k = j + 1; k < row.length; k++) {
-                        if (row[k] === "") colspan++;
-                        else break;
-                    }
-                    html += "<td style='padding:5px; font-weight:bold; background:#f0f0f0;' colspan='" + colspan + "'>" + row[j] + "</td>";
-                    j += colspan;
-                } else {
-                    html += "<td style='padding:5px;'>&nbsp;</td>";
-                    j++;
-                }
-            }
-            html += "</tr>";
-        } else {
-            // Planned / Actual / Diff / Unit rows
-            html += "<tr>";
-            row.forEach(function (cell, colIndex) {
-                // Detect if header above is "Actual"
-                if (data[i - 1] && data[i - 1][colIndex] && data[i - 1][colIndex].toString().toLowerCase() === "actual") {
-                    html += "<td style='padding:4px;'><input type='text' name='cell_" + i + "_" + colIndex + "' value='" + (cell || "") + "' style='width:80px;'></td>";
-                } else {
-                    html += "<td style='padding:4px;'>" + (cell || "&nbsp;") + "</td>";
-                }
-            });
-            html += "</tr>";
-        }
+    ["D", "I", "N", "S", "X", "AC", "AH", "AM", "AR", "AW"]
+        .forEach(c => sheet.getRange(c + "11:" + c + lastRow).clearContent());
+}
+
+
+
+function clearPMSAY11BC() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("PMS");
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= 11) {
+        sheet.getRange("AY11:BC" + lastRow).clearContent();
     }
 
-    html += "</table>";
-    html += "<br><input type='submit' value='Update Sheet' style='padding:5px 10px;'>";
-    html += "</form>";
-
-    GmailApp.sendEmail(
-        "mis@optionfoodmanagement.in,sankalp@optionfoodmanagement.in",
-        "Daily Planned Vs Actual Report - According To Your Recipe",
-        "This is Option MIS System",
-        { htmlBody: html }
-    );
-
-    Logger.log("Email sent successfully!");
+    SpreadsheetApp.getUi().alert("AY11:BC data cleared!");
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ============ NEW FUNCTIONS FOR REACT APP ============
 
@@ -172,7 +178,16 @@ function doGet(e) {
             const targetCol = col + 1;
 
             // CRITICAL: Block any writes to rows 1-7 (headers/formulas)
-            if (targetRow <= 7) {
+            // EXCEPT for the specific filter dropdowns used by the app:
+            // A1 (row 1, col 1): Client
+            // A2 (row 2, col 1): Meal/Venue
+            // P1 (row 1, col 16): Date
+            // M1 (row 1, col 13): Date (Secondary)
+            // AE1 (row 1, col 31): Meal (Secondary)
+            const isFilterCell = (targetRow === 1 && (targetCol === 1 || targetCol === 16 || targetCol === 13 || targetCol === 31)) ||
+                (targetRow === 2 && targetCol === 1);
+
+            if (targetRow <= 7 && !isFilterCell) {
                 Logger.log(`🚫 BLOCKED: Attempt to write to header row ${targetRow}, col ${targetCol}`);
                 return ContentService.createTextOutput(JSON.stringify({
                     success: false,
@@ -183,7 +198,7 @@ function doGet(e) {
 
             // CRITICAL: Protect item name columns (C, G, K, O, S, W, AA, AE, AI = cols 3, 7, 11, 15, 19, 23, 27, 31, 35)
             const itemNameColumns = new Set([3, 7, 11, 15, 19, 23, 27, 31, 35]);
-            if (itemNameColumns.has(targetCol)) {
+            if (itemNameColumns.has(targetCol) && !isFilterCell) {
                 Logger.log(`🚫 BLOCKED: Cannot modify item name column ${targetCol}`);
                 return ContentService.createTextOutput(JSON.stringify({
                     success: false,
@@ -231,12 +246,12 @@ function doGet(e) {
             const allowedActualCols = new Set([4, 8, 12, 16, 20, 24, 28, 32, 36]); // D,H,L,P,T,X,AB,AF,AJ
             const inAllowedCols = allowedActualCols.has(targetCol);
 
-            if (!(inAllowedCols || isHeaderActual)) {
-                Logger.log(`🚫 BLOCKED: Column ${targetCol} is not an Actual column`);
+            if (!(inAllowedCols || isHeaderActual || isFilterCell)) {
+                Logger.log(`🚫 BLOCKED: Column ${targetCol} is not an Actual column and not a filter cell`);
                 return ContentService.createTextOutput(JSON.stringify({
                     success: false,
                     error: "Write blocked to protect item names (not an Actual column)",
-                    details: { row: targetRow, col: targetCol, inAllowedCols, isHeaderActual }
+                    details: { row: targetRow, col: targetCol, inAllowedCols, isHeaderActual, isFilterCell }
                 })).setMimeType(ContentService.MimeType.JSON);
             }
 
@@ -376,6 +391,41 @@ function doGet(e) {
 
         if (action === "diagnostic") {
             return getDiagnostic();
+        }
+
+
+        if (action === "fetch") {
+            const sheetName = e.parameter.sheet || "PMS";
+            const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+            if (!sheet) {
+                return ContentService.createTextOutput(JSON.stringify({ error: "Sheet not found" }))
+                    .setMimeType(ContentService.MimeType.JSON);
+            }
+
+            // ⚡ Performance: allow fetching only the needed range instead of whole sheet
+            // Query params supported:
+            // - range= A1:AX150
+            // - rows=200&cols=60  (starts from A1)
+            const rangeA1 = e.parameter.range;
+            const rowsParam = parseInt(e.parameter.rows || "", 10);
+            const colsParam = parseInt(e.parameter.cols || "", 10);
+
+            let values;
+            if (rangeA1) {
+                values = sheet.getRange(rangeA1).getValues();
+            } else if (!isNaN(rowsParam) && !isNaN(colsParam) && rowsParam > 0 && colsParam > 0) {
+                const maxRows = Math.min(rowsParam, sheet.getMaxRows());
+                const maxCols = Math.min(colsParam, sheet.getMaxColumns());
+                values = sheet.getRange(1, 1, maxRows, maxCols).getValues();
+            } else {
+                // fallback: safe default (avoid full getDataRange for big sheets)
+                const maxRows = Math.min(200, sheet.getMaxRows());
+                const maxCols = Math.min(60, sheet.getMaxColumns());
+                values = sheet.getRange(1, 1, maxRows, maxCols).getValues();
+            }
+
+            return ContentService.createTextOutput(JSON.stringify(values))
+                .setMimeType(ContentService.MimeType.JSON);
         }
 
         // Default: Return sheet data
@@ -935,33 +985,39 @@ function setFiltersAndVerify(client, date, meal) {
                 cellA1.setValue(clientStr);
             } catch (e) {
                 Logger.log("⚠️ A1 validation error, clearing...");
-                cellA1.clearDataValidations();
+                cellA1.clearDataValidation();
                 cellA1.setValue(clientStr);
             }
         }
 
-        // Set date (P1) - reverted to P1 as M1 is not driving the sheet
+        // Set date (P1) - primary date, also M1 as secondary
         if (dateStr) {
-            const cellM1 = sheet.getRange("P1");
-            try {
-                cellM1.setValue(dateStr);
-            } catch (e) {
-                Logger.log("⚠️ P1 validation error, clearing...");
-                cellM1.clearDataValidations();
-                cellM1.setValue(dateStr);
-            }
+            const dateCells = ["P1", "M1"];
+            dateCells.forEach(cell => {
+                const range = sheet.getRange(cell);
+                try {
+                    range.setValue(dateStr);
+                } catch (e) {
+                    Logger.log(`⚠️ ${cell} validation error, clearing...`);
+                    range.clearDataValidation();
+                    range.setValue(dateStr);
+                }
+            });
         }
 
-        // Set meal (AE1) - reverted to AE1 as Y1 is not driving the sheet
+        // Set meal (A2) - primary meal, also AE1 as secondary
         if (mealStr) {
-            const cellY1 = sheet.getRange("AE1");
-            try {
-                cellY1.setValue(mealStr);
-            } catch (e) {
-                Logger.log("⚠️ AE1 validation error, clearing...");
-                cellY1.clearDataValidations();
-                cellY1.setValue(mealStr);
-            }
+            const mealCells = ["A2", "AE1"];
+            mealCells.forEach(cell => {
+                const range = sheet.getRange(cell);
+                try {
+                    range.setValue(mealStr);
+                } catch (e) {
+                    Logger.log(`⚠️ ${cell} validation error, clearing...`);
+                    range.clearDataValidation();
+                    range.setValue(mealStr);
+                }
+            });
         }
 
         // Force recalculation
@@ -972,8 +1028,8 @@ function setFiltersAndVerify(client, date, meal) {
             const dummyCell = sheet.getRange("Z1000");
             dummyCell.setValue(new Date().getTime());
             SpreadsheetApp.flush();
-            // Wait briefly for formulas to recalculate
-            Utilities.sleep(800);
+            // Wait longer for formulas to recalculate (increased from 800ms)
+            Utilities.sleep(3000);
             // Clear dummy cell
             dummyCell.clearContent();
             SpreadsheetApp.flush();
@@ -981,17 +1037,19 @@ function setFiltersAndVerify(client, date, meal) {
 
         // Verify the values are set correctly
         const actualClient = sheet.getRange("A1").getValue();
-        const actualDate = sheet.getRange("P1").getValue();  // Changed to P1
-        const actualMeal = sheet.getRange("AE1").getValue();  // Changed to AE1
+        const actualDate = sheet.getRange("P1").getValue();
+        const actualMeal = sheet.getRange("A2").getValue();
+        const actualMealAE1 = sheet.getRange("AE1").getValue();
 
-        Logger.log("✅ Values after set - A1: " + actualClient + ", P1: " + actualDate + ", AE1: " + actualMeal);
+        Logger.log("✅ Values after set - A1: " + actualClient + ", P1: " + actualDate + ", A2: " + actualMeal + ", AE1: " + actualMealAE1);
 
         const verification = {
             requested: { client: clientStr, date: dateStr, meal: mealStr },
             actual: {
                 client: actualClient?.toString().trim() || "",
                 date: actualDate ? formatDateValue(actualDate) : "",
-                meal: actualMeal?.toString().trim() || ""
+                meal: actualMeal?.toString().trim() || "",
+                mealAE1: actualMealAE1?.toString().trim() || ""
             },
             rawActual: {
                 client: actualClient,
@@ -1004,7 +1062,11 @@ function setFiltersAndVerify(client, date, meal) {
         // Check if values match (with some flexibility for date formatting)
         const normalizeForComparison = (val) => val?.toString().trim().toLowerCase() || "";
         const clientMatches = normalizeForComparison(verification.requested.client) === normalizeForComparison(verification.actual.client);
-        const mealMatches = normalizeForComparison(verification.requested.meal) === normalizeForComparison(verification.actual.meal);
+
+        // Meal matches if either A2 or AE1 matches
+        const mealMatchesA2 = normalizeForComparison(verification.requested.meal) === normalizeForComparison(verification.actual.meal);
+        const mealMatchesAE1 = normalizeForComparison(verification.requested.meal) === normalizeForComparison(verification.actual.mealAE1);
+        const mealMatches = mealMatchesA2 || mealMatchesAE1;
 
         // For date, try to match both formats
         const normalizeDateForComparison = (val) => {
@@ -1096,23 +1158,27 @@ function handleEmailRequest(e) {
 
 function clearSelectedData() {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var lastRow = sheet.getLastRow();
 
     var ranges = [
-        "D8:D",
-        "H8:H",
-        "L8:L",
-        "P8:P",
-        "T8:T",
-        "X8:X",
-        "AB8:AB",
-        "AF8:AF",
-        "AJ8:AJ"
+        ["D8:D8", "D10:D" + lastRow],
+        ["H8:H8", "H10:H" + lastRow],
+        ["N8:N8", "N10:N" + lastRow],
+        ["S8:S8", "S10:S" + lastRow],
+        ["X8:X8", "X10:X" + lastRow],
+        ["AC8:AC8", "AC10:AC" + lastRow],
+        ["AH8:AH8", "AH10:AH" + lastRow],
+        ["AM8:AM8", "AM10:AM" + lastRow],
+        ["AR8:AR8", "AR10:AR" + lastRow]
     ];
 
-    ranges.forEach(function (range) {
-        sheet.getRange(range).clearContent();
+    ranges.forEach(function (group) {
+        group.forEach(function (range) {
+            sheet.getRange(range).clearContent();
+        });
     });
 }
+
 
 // ============ DIAGNOSTIC FUNCTION ============
 // Call this to check data consistency and structure

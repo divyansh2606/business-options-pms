@@ -11,6 +11,7 @@ import EmployeesManagement from "./EmployeesManagement";
 import MenuItemsManagement from "./MenuItemsManagement";
 import FinancialData from "./FinancialData";
 import Settings from "./Settings";
+import Feedback from "./Feedback";
 
 // Import API functions
 import { fetchPMSData, fetchRecipeData } from "../../api/restaurantAPI";
@@ -108,7 +109,10 @@ export default function Dashboard() {
       { id: "employees", label: "Employees" },
       { id: "menu", label: "Menu Items" },
       { id: "financial", label: "Financial Data" },
-      ...(user.role === 'ceo' ? [{ id: "settings", label: "Settings" }] : [])
+      ...(user.role === 'ceo' ? [
+        { id: "feedback", label: "Feedback" },
+        { id: "settings", label: "Settings" }
+      ] : [])
     ];
 
     const activeTabItem = allTabs.find(tab => tab.id === activeTab);
@@ -174,6 +178,7 @@ export default function Dashboard() {
               {activeTab === "employees" && <EmployeesManagement data={data.pms} />}
               {activeTab === "menu" && <MenuItemsManagement data={data.pms} />}
               {activeTab === "financial" && <FinancialData data={data.pms} />}
+              {activeTab === "feedback" && user.role === 'ceo' && <Feedback />}
               {activeTab === "settings" && user.role === 'ceo' && <Settings />}
             </div>
           )}

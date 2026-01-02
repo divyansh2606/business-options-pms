@@ -14,6 +14,7 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout, isOpe
 
   // Add Settings tab only for CEO
   if (user?.role === 'ceo') {
+    menuItems.push({ id: "feedback", label: "Feedback", icon: "💬" });
     menuItems.push({ id: "settings", label: "Settings", icon: "⚙️" });
   }
 
