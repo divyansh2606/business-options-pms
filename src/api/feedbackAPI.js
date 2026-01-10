@@ -45,9 +45,11 @@ export const fetchFeedbackData = async () => {
 
         const parsedData = rows.map(row => {
             const dateRaw = row[0]; // (A) Timestamp
-            const company = row[1]?.toString().trim(); // (B) Client Name
+            // Try Column B (index 1) or Column C (index 2) for company name
+            // Often Google Forms have Timestamp, Email, THEN Client Site Name
+            const company = row[1]?.toString().trim() || row[2]?.toString().trim();
 
-            if (!company) return null;
+            if (!company || company.includes("@") || company.toLowerCase() === "email address") return null;
 
             const ratings = {};
             let totalScore = 0;

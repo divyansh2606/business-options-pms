@@ -129,6 +129,7 @@
             <button onclick="testGetMeals()">3. Test Get Meals</button>
             <button onclick="testSetFilters()">4. Test Set Filters</button>
             <button onclick="testFetchPMS()">5. Test Fetch PMS Data</button>
+            <button onclick="testFetchFeedback()">6. Test Fetch Feedback</button>
             <button onclick="testFullFlow()">🚀 TEST FULL FLOW</button>
             <button onclick="clearOutput()">Clear Output</button>
         </div>
@@ -422,6 +423,45 @@
                 }
             } catch (error) {
                 log(`❌ Step 3 FAILED: ${error.message}`, 'error');
+            }
+        }
+
+        async function testFetchFeedback() {
+            clearOutput();
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+            log('TEST 6: Fetching Feedback Data', 'info');
+            log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+
+            try {
+                const url = `${getApiUrl()}?action=getFeedback&_t=${Date.now()}`;
+                log(`URL: ${url}`, 'info');
+
+                const response = await fetch(url);
+                log(`Response Status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                const data = await response.json();
+
+                if (data.error) {
+                    log(`❌ Error from server: ${data.error}`, 'error');
+                    log(`💡 Make sure you have a sheet named "Feedback" or "Audit"`, 'warning');
+                    return;
+                }
+
+                log(`✅ Received ${data.length} rows`, 'success');
+
+                if (data.length > 1) {
+                    const headers = data[0];
+                    const row1 = data[1];
+                    log(`\n📊 SAMPLE DATA (Row 2):`, 'info');
+                    headers.forEach((h, i) => {
+                        log(`  [Col ${i}] ${h}: "${row1[i]}"`, 'info');
+                    });
+                } else {
+                    log(`⚠️ No data rows found (only header or empty)`, 'warning');
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, 'error');
+                log(error.stack, 'error');
             }
         }
     </script>

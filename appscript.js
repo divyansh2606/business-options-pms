@@ -593,6 +593,22 @@ function doGet(e) {
             return getDiagnostic();
         }
 
+        if (action === "getFeedback") {
+            const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Feedback") ||
+                SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Audit");
+
+            if (!sheet) {
+                return ContentService.createTextOutput(JSON.stringify({ error: "Feedback or Audit sheet not found" }))
+                    .setMimeType(ContentService.MimeType.JSON);
+            }
+
+            SpreadsheetApp.flush();
+            const data = sheet.getDataRange().getValues();
+
+            return ContentService.createTextOutput(JSON.stringify(data))
+                .setMimeType(ContentService.MimeType.JSON);
+        }
+
         // Default: Return sheet data
         const sheetName = e.parameter.sheet || "PMS";
         const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
