@@ -162,7 +162,11 @@ export default function Dashboard() {
 
         {/* Dynamic Content Rendering */}
         <div className="p-4 md:p-8">
-          {loading ? (
+          {activeTab === "dashboard" ? (
+            <div className="w-full max-w-full">
+              <DashboardSummary />
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center h-full min-h-[50vh]">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-b-4 border-blue-600 mx-auto mb-4"></div>
@@ -171,7 +175,6 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="w-full max-w-full">
-              {activeTab === "dashboard" && <DashboardSummary data={data.pms} />}
               {activeTab === "productionSummary" && <ProductionSummary />}
               {activeTab === "stock" && <StockManagement data={data.itemWise} user={user} />}
               {activeTab === "orders" && <OrdersManagement data={data.pms} />}

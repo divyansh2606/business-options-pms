@@ -16,7 +16,7 @@ function copyMenuData() {
 
     const lastRow = sourceSheet.getLastRow();
     if (lastRow < 10) {
-        SpreadsheetApp.getUi().alert("No data to copy!");
+        Logger.log("No data to copy!");
         return;
     }
 
@@ -24,7 +24,7 @@ function copyMenuData() {
     const filteredData = data.filter(r => r.some(c => c !== ""));
 
     if (filteredData.length === 0) {
-        SpreadsheetApp.getUi().alert("No data to copy!");
+        Logger.log("No data to copy!");
         return;
     }
 
@@ -43,8 +43,93 @@ function copyMenuData() {
         .getRange(startRow, 1, updatedData.length, updatedData[0].length)
         .setValues(updatedData);
 
-    SpreadsheetApp.getUi().alert("Data copied successfully!");
+    Logger.log("Data copied successfully!");
 }
+
+// ✅ NEW: Paste ingredient data to ingredient sheet - HORIZONTAL layout
+// Layout: Recipe items (A-AW) | Manual items (AY-BE) | Metadata (BF-BJ) - all in same rows
+function pasteIngredientManualData() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sourceSheet = ss.getSheetByName("PMS");
+    const targetSheet = ss.getSheetByName("ingredient");
+
+    const client = sourceSheet.getRange("A1").getValue();
+    const venue = sourceSheet.getRange("A2").getValue();
+    const menuDate = sourceSheet.getRange("P1").getValue();
+
+    const lastRow = sourceSheet.getLastRow();
+    if (lastRow < 10) {
+        Logger.log("No data to paste!");
+        return;
+    }
+
+    // ========== Get all data from PMS sheet ==========
+    // Recipe items: A10:AW (columns 1-49, which is A to AW)
+    const recipeData = sourceSheet.getRange("A10:AW" + lastRow).getValues();
+
+    // Manual entry items: AY11:BE (columns 51-57, which is AY to BE)
+    // Note: We need to get from row 11 onwards for manual data
+    const manualData = lastRow >= 11
+        ? sourceSheet.getRange("AY11:BE" + lastRow).getValues()
+        : [];
+
+    // ========== Build combined rows ==========
+    const numRows = Math.max(recipeData.length, manualData.length);
+    const combinedRows = [];
+
+    for (let i = 0; i < numRows; i++) {
+        const row = [];
+
+        // SECTION 1: Recipe items (columns A-AW = 49 columns)
+        if (i < recipeData.length) {
+            row.push(...recipeData[i]);
+        } else {
+            // Empty cells for recipe section if no data
+            row.push(...Array(49).fill(""));
+        }
+
+        // GAP: Column AX (1 empty column between recipe and manual sections)
+        row.push("");
+
+        // SECTION 2: Manual entry (columns AY-BE = 7 columns)
+        // AY=Item Name, AZ=Planned, BA=Unit, BB=Actual, BC=Recipe, BD=L1, BE=L2
+        // Manual data starts from row 11 in PMS, so we need to offset by 1
+        const manualRowIndex = i - 1; // Because manual starts at row 11, recipe at row 10
+        if (manualRowIndex >= 0 && manualRowIndex < manualData.length) {
+            row.push(...manualData[manualRowIndex]);
+        } else {
+            // Empty cells for manual section if no data
+            row.push(...Array(7).fill(""));
+        }
+
+        // SECTION 3: Metadata (columns BF-BJ = 5 columns)
+        // BF=Client, BG=Venue, BH=Date, BI=Planned, BJ=Actual
+        row.push(client, venue, menuDate, "", "");
+
+        combinedRows.push(row);
+    }
+
+    // Filter out completely empty rows
+    const filteredRows = combinedRows.filter(r => r.some(c => c !== "" && c !== null));
+
+    if (filteredRows.length === 0) {
+        Logger.log("No data to paste after filtering!");
+        return;
+    }
+
+    // ========== Paste to ingredient sheet ==========
+    const startRow = targetSheet.getLastRow() + 1;
+    const numCols = filteredRows[0].length;
+
+    targetSheet
+        .getRange(startRow, 1, filteredRows.length, numCols)
+        .setValues(filteredRows);
+
+    Logger.log("✅ Ingredient data pasted successfully!");
+    Logger.log(`   - ${filteredRows.length} rows pasted`);
+    Logger.log(`   - Recipe items (A-AW) | Manual items (AY-BE) | Metadata (BF-BJ: ${client}, ${venue}, ${menuDate})`);
+}
+
 
 
 
@@ -100,35 +185,53 @@ function pasteFullData() {
 
 
 
-// 🔹 Sirf row 8 clear karega
+// 🔹 Sirf row 8 clear karega (Weight)
 function clearPMSRow8() {
-    const sheet = SpreadsheetApp.getActive().getSheetByName("PMS");
-    ["D8", "I8", "N8", "S8", "X8", "AC8", "AH8", "AM8", "AR8", "AW8"]
-        .forEach(c => sheet.getRange(c).clearContent());
-}
-
-// 🔹 Row 11 se lastRow tak clear karega
-function clearPMSFrom11() {
-    const sheet = SpreadsheetApp.getActive().getSheetByName("PMS");
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 11) return;
-
-    ["D", "I", "N", "S", "X", "AC", "AH", "AM", "AR", "AW"]
-        .forEach(c => sheet.getRange(c + "11:" + c + lastRow).clearContent());
-}
-
-
-
-function clearPMSAY11BC() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName("PMS");
+    if (!sheet) return "Error: PMS sheet not found";
 
-    const lastRow = sheet.getLastRow();
-    if (lastRow >= 11) {
-        sheet.getRange("AY11:BC" + lastRow).clearContent();
-    }
+    // Column indices for Actual weights of 10 items (D, I, N, S, X, AC, AH, AM, AR, AW)
+    const colIndices = [4, 9, 14, 19, 24, 29, 34, 39, 44, 49];
+    colIndices.forEach(col => {
+        sheet.getRange(8, col).clearContent();
+    });
+    SpreadsheetApp.flush();
+    return "Row 8 (Weight) cleared successfully.";
+}
 
-    SpreadsheetApp.getUi().alert("AY11:BC data cleared!");
+// 🔹 Row 11 onwards clear karega (Ingredients Actuals)
+// Fixed range 11-500 to ensure reliability and NO touch of row 8 or 10.
+function clearPMSFrom11() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("PMS");
+    if (!sheet) return "Error: PMS sheet not found";
+
+    // Columns for Ingredient Actuals: D, I, N, S, X, AC, AH, AM, AR, AW
+    const colIndices = [4, 9, 14, 19, 24, 29, 34, 39, 44, 49];
+
+    colIndices.forEach(col => {
+        // Clear from Row 11 to 500. This CANNOT touch Row 8 or Row 10.
+        sheet.getRange(11, col, 490, 1).clearContent();
+    });
+
+    SpreadsheetApp.flush();
+    return "Cleared ingredient actuals from Row 11 to 500. Row 8 and 10 were NOT touched.";
+}
+
+// 🔹 Manual entry section clear karega (AY11:BE)
+// Fixed range 11-500 to ensure everything is gone.
+function clearPMSAY11BE() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("PMS");
+    if (!sheet) return "Error: PMS sheet not found";
+
+    // AY=51, BE=57. 7 columns: AY, AZ, BA, BB, BC, BD, BE
+    // Clear Row 11 to 500. This isolates from headers/summary above.
+    sheet.getRange(11, 51, 490, 7).clearContent();
+
+    SpreadsheetApp.flush();
+    return "Manual Entry section (Columns AY to BE, Rows 11 to 500) cleared successfully.";
 }
 
 
@@ -160,6 +263,101 @@ function doGet(e) {
 
     try {
         const action = e.parameter.action;
+
+        // ✅ Trigger PMS -> Weight sheet paste (same as the Google Sheet "Weight" button)
+        // Frontend calls: ?action=pasteWeight
+        if (action === "pasteWeight") {
+            try {
+                pasteFullData();
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: true,
+                    action: "pasteWeight",
+                    message: "PMS row 8 + menu block pasted to Weight sheet"
+                })).setMimeType(ContentService.MimeType.JSON);
+            } catch (err) {
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: false,
+                    action: "pasteWeight",
+                    error: err && err.message ? err.message : String(err)
+                })).setMimeType(ContentService.MimeType.JSON);
+            }
+        }
+
+        // ✅ Trigger PMS -> ingredient sheet paste (manual AY:BE) (same as Google Sheet "Ingredient" button)
+        // Frontend calls: ?action=pasteIngredient
+        if (action === "pasteIngredient") {
+            try {
+                pasteIngredientManualData();
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: true,
+                    action: "pasteIngredient",
+                    message: "PMS AY:BE rows appended to ingredient sheet"
+                })).setMimeType(ContentService.MimeType.JSON);
+            } catch (err) {
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: false,
+                    action: "pasteIngredient",
+                    error: err && err.message ? err.message : String(err)
+                })).setMimeType(ContentService.MimeType.JSON);
+            }
+        }
+
+        // ✅ Clear Weight Data (Row 8 Actual values)
+        // Frontend calls: ?action=clearWeight
+        if (action === "clearWeight") {
+            try {
+                const msg = clearPMSRow8();
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: true,
+                    action: "clearWeight",
+                    message: msg
+                })).setMimeType(ContentService.MimeType.JSON);
+            } catch (err) {
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: false,
+                    action: "clearWeight",
+                    error: err && err.message ? err.message : String(err)
+                })).setMimeType(ContentService.MimeType.JSON);
+            }
+        }
+
+        // ✅ Clear Ingredient Data (Row 11+ Actual values)
+        // Frontend calls: ?action=clearIngredient
+        if (action === "clearIngredient") {
+            try {
+                const msg = clearPMSFrom11();
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: true,
+                    action: "clearIngredient",
+                    message: msg
+                })).setMimeType(ContentService.MimeType.JSON);
+            } catch (err) {
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: false,
+                    action: "clearIngredient",
+                    error: err && err.message ? err.message : String(err)
+                })).setMimeType(ContentService.MimeType.JSON);
+            }
+        }
+
+        // ✅ Clear Manual Entry Data (AY:BE columns, Row 11+)
+        // Frontend calls: ?action=clearManual
+        if (action === "clearManual") {
+            try {
+                const msg = clearPMSAY11BE();
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: true,
+                    action: "clearManual",
+                    message: msg
+                })).setMimeType(ContentService.MimeType.JSON);
+            } catch (err) {
+                return ContentService.createTextOutput(JSON.stringify({
+                    success: false,
+                    action: "clearManual",
+                    error: err && err.message ? err.message : String(err)
+                })).setMimeType(ContentService.MimeType.JSON);
+            }
+        }
 
         if (action === "update") {
             const sheetName = e.parameter.sheet || "PMS";
@@ -246,7 +444,9 @@ function doGet(e) {
             const allowedActualCols = new Set([4, 8, 12, 16, 20, 24, 28, 32, 36]); // D,H,L,P,T,X,AB,AF,AJ
             const inAllowedCols = allowedActualCols.has(targetCol);
 
-            if (!(inAllowedCols || isHeaderActual || isFilterCell)) {
+            const isManualIngredientCell = (targetRow >= 11 && targetCol >= 51 && targetCol <= 57); // AY..BE rows 11+
+
+            if (!(inAllowedCols || isHeaderActual || isFilterCell || isManualIngredientCell)) {
                 Logger.log(`🚫 BLOCKED: Column ${targetCol} is not an Actual column and not a filter cell`);
                 return ContentService.createTextOutput(JSON.stringify({
                     success: false,
@@ -391,41 +591,6 @@ function doGet(e) {
 
         if (action === "diagnostic") {
             return getDiagnostic();
-        }
-
-
-        if (action === "fetch") {
-            const sheetName = e.parameter.sheet || "PMS";
-            const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-            if (!sheet) {
-                return ContentService.createTextOutput(JSON.stringify({ error: "Sheet not found" }))
-                    .setMimeType(ContentService.MimeType.JSON);
-            }
-
-            // ⚡ Performance: allow fetching only the needed range instead of whole sheet
-            // Query params supported:
-            // - range= A1:AX150
-            // - rows=200&cols=60  (starts from A1)
-            const rangeA1 = e.parameter.range;
-            const rowsParam = parseInt(e.parameter.rows || "", 10);
-            const colsParam = parseInt(e.parameter.cols || "", 10);
-
-            let values;
-            if (rangeA1) {
-                values = sheet.getRange(rangeA1).getValues();
-            } else if (!isNaN(rowsParam) && !isNaN(colsParam) && rowsParam > 0 && colsParam > 0) {
-                const maxRows = Math.min(rowsParam, sheet.getMaxRows());
-                const maxCols = Math.min(colsParam, sheet.getMaxColumns());
-                values = sheet.getRange(1, 1, maxRows, maxCols).getValues();
-            } else {
-                // fallback: safe default (avoid full getDataRange for big sheets)
-                const maxRows = Math.min(200, sheet.getMaxRows());
-                const maxCols = Math.min(60, sheet.getMaxColumns());
-                values = sheet.getRange(1, 1, maxRows, maxCols).getValues();
-            }
-
-            return ContentService.createTextOutput(JSON.stringify(values))
-                .setMimeType(ContentService.MimeType.JSON);
         }
 
         // Default: Return sheet data
@@ -1320,7 +1485,7 @@ function diagnosticCheck() {
             });
 
             if (!menuHasSimilarDate && pmsDateFormatted) {
-                report.warnings.push(`⚠️ PMS Date "${pmsDateFormatted}" not found in MENU sheet`);
+                report.warnings.push(`⚠️ PMS Date "${pmsDateFormated}" not found in MENU sheet`);
             }
         }
     }

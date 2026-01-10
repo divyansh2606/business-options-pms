@@ -321,7 +321,9 @@ export default function ProductionSummary() {
     const [allMenus, setAllMenus] = useState(() => {
         try {
             const cached = localStorage.getItem('production_summary_cache');
-            return cached ? JSON.parse(cached) : [];
+            if (!cached) return [];
+            const parsed = JSON.parse(cached);
+            return Array.isArray(parsed) ? parsed : [];
         } catch { return []; }
     });
 

@@ -1,7 +1,8 @@
 // src/api/restaurantAPI2.js - Apps Script Method (with MENU options)
 
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbxZY1V-n4iW8rn8Up-NPSyYw-4CdESiyWbqGU7bso-N523vJ5HF2A5mEtHRq9QhgDy5/exec";
+  "https://script.google.com/macros/s/AKfycbyJlapvKcVfe0LqXB25kVV0IbqkrLAU00-izqPgewZ6wEVQ5xIk0q7aSohqg57ytD4c/exec";
+
 // ------- Lightweight localStorage cache helpers -------
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -32,18 +33,9 @@ function setLocalCache(key, value, ttlMs = CACHE_TTL_MS) {
     console.warn("Local cache write error:", e);
   }
 }
-async function fetchSheetData(sheetName, options = {}) {
+async function fetchSheetData(sheetName) {
   try {
-    const { rows, cols, range, noCache } = options || {};
-    const params = new URLSearchParams({
-      action: "fetch",
-      sheet: sheetName,
-    });
-    if (range) params.set("range", range);
-    if (rows) params.set("rows", String(rows));
-    if (cols) params.set("cols", String(cols));
-    if (noCache) params.set("_t", String(Date.now())); // only when you really need cache-bust
-    const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
+    const url = `${APPS_SCRIPT_URL}?action=fetch&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`;
 
     console.log(`📡 Fetching "${sheetName}" from Apps Script...`);
     console.log(`🌐 URL: ${url}`);
@@ -82,7 +74,7 @@ async function fetchSheetData(sheetName, options = {}) {
 // ----- PMS DATA (actual menu + items) -----
 export const fetchPMSData = async () => {
   console.log("🔄 Fetching PMS Data via Apps Script...");
-  const data = await fetchSheetData("PMS", { rows: 200, cols: 60 });
+  const data = await fetchSheetData("PMS");
   console.log(`✅ TOTAL PMS ROWS: ${data.length}`);
 
   if (data.length > 50) {
@@ -95,13 +87,13 @@ export const fetchPMSData = async () => {
 // ----- RECIPE DATA -----
 export const fetchRecipeData = async () => {
   console.log("🔄 Fetching Recipe Data...");
-  return await fetchSheetData("P Vs A (Recipe)", { rows: 2000, cols: 40 });
+  return await fetchSheetData("P Vs A (Recipe)");
 };
 
 // ----- MENU OPTIONS -----
 export const fetchMenuOptions = async () => {
   console.log("🔄 Fetching MENU (dropdown options)...");
-  const rows = await fetchSheetData("MENU", { rows: 5000, cols: 3 });
+  const rows = await fetchSheetData("MENU");
 
   const mealSet = new Set();
   const clientSet = new Set();
@@ -226,6 +218,37 @@ export const updatePMSDropdown = async ({ sheet, dropdownCell, value }) => {
     throw err;
   }
 };
+
+// ----- NEW: Trigger PMS -> Weight sheet paste (same as clicking "Weight" in Google Sheet) -----
+export const pasteWeightToSheet = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=pasteWeight&_t=${Date.now()}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    console.error("❌ Error in pasteWeightToSheet:", err);
+    throw err;
+  }
+};
+
+// ----- NEW: Trigger PMS -> ingredient sheet paste (manual AY:BE) -----
+export const pasteIngredientToSheet = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=pasteIngredient&_t=${Date.now()}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    console.error("❌ Error in pasteIngredientToSheet:", err);
+    throw err;
+  }
+};
+
 
 // ----- NEW: Direct Cell Update (for auto-save) -----
 export const updateCell = async (sheet, rowIndex, colIndex, value) => {
@@ -393,36 +416,31 @@ export const setFiltersAndVerify = async (client, date, meal) => {
   try {
     console.log("🛠️ Calling setFilters action to update dropdowns and verify...");
 
-    // Support both plain values and { value, fast } objects coming from UI
-    const normalize = (x) => {
-      if (x && typeof x === "object") {
-        return {
-          value: x.value !== undefined ? x.value : "",
-          fast: !!x.fast,
-        };
-      }
-      return { value: x || "", fast: false };
+    // Support both plain strings and { value, fast } objects
+    const normalize = (v) => {
+      if (v && typeof v === "object") return v.value ?? "";
+      return v ?? "";
     };
+    const isFast = (v) => Boolean(v && typeof v === "object" && v.fast);
 
-    const c = normalize(client);
-    const d = normalize(date);
-    const m = normalize(meal);
-
-    // If any argument is marked fast, run setFilters in fast mode (skips server-side sleep)
-    const fast = c.fast || d.fast || m.fast;
+    const clientVal = normalize(client);
+    const dateVal = normalize(date);
+    const mealVal = normalize(meal);
+    const fast = isFast(client) || isFast(date) || isFast(meal);
 
     const params = new URLSearchParams({
       action: "setFilters",
-      client: c.value || "",
-      date: d.value || "",
-      meal: m.value || "",
+      client: clientVal,
+      date: dateVal,
+      meal: mealVal,
       _t: Date.now().toString(),
     });
 
+    // Apps Script supports fast=true to skip sleep/recalc delays
     if (fast) params.set("fast", "true");
 
     const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
-    console.log("🛰️ Verifying filters via Apps Script:", { client: c.value, date: d.value, meal: m.value, fast });
+    console.log("🛰️ Verifying filters via Apps Script:", { client: clientVal, date: dateVal, meal: mealVal, fast });
     console.log("🌐 URL:", url);
 
     const res = await fetch(url, { method: "GET" });
@@ -444,11 +462,9 @@ export const setFiltersAndVerify = async (client, date, meal) => {
       throw new Error(data?.error || "setFilters failed");
     }
 
-    console.log("🔎 Server verification:", data.verification);
-    return data.verification;
+    return data;
   } catch (err) {
     console.error("❌ Error in setFiltersAndVerify:", err);
-    console.error("❌ Error details:", err.message, err.stack);
     throw err;
   }
 };
@@ -470,6 +486,52 @@ export const fetchDiagnosticReport = async () => {
     return data;
   } catch (err) {
     console.error("❌ Error fetching diagnostic report:", err);
+    throw err;
+  }
+};
+// Add these three functions to restaurantAPI2.js at the end of the file (before the last closing brace)
+
+// ----- NEW: Clear Weight Data (Row 8 Actual values) -----
+export const clearWeightData = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=clearWeight&_t=${Date.now()}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    console.error("❌ Error in clearWeightData:", err);
+    throw err;
+  }
+};
+
+// ----- NEW: Clear Ingredient Data (Row 11+ Actual values) -----
+export const clearIngredientData = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=clearIngredient&_t=${Date.now()}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    console.error("❌ Error in clearIngredientData:", err);
+    throw err;
+  }
+};
+
+// ----- NEW: Clear Manual Entry Data (AY:BE columns, Row 11+) -----
+export const clearManualData = async () => {
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=clearManual&_t=${Date.now()}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    console.error("❌ Error in clearManualData:", err);
     throw err;
   }
 };
